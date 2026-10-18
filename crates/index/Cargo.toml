@@ -1,0 +1,18 @@
+[package]
+name = "code-intel-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+code-intel-core.workspace = true
+code-intel-store.workspace = true
+anyhow.workspace = true
+blake3.workspace = true
+ignore.workspace = true
+tree-sitter.workspace = true
+tree-sitter-typescript.workspace = true
+
+[lints]
+workspace = true

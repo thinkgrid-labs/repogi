@@ -1,0 +1,26 @@
+[package]
+name = "code-intel-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "code-intel"
+path = "src/main.rs"
+
+[dependencies]
+code-intel-core.workspace = true
+code-intel-store.workspace = true
+code-intel-index.workspace = true
+code-intel-retrieval.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rusqlite.workspace = true
+
+[lints]
+workspace = true
