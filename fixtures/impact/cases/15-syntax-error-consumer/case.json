@@ -1,0 +1,39 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/components/MetricCard.tsx",
+   "M src/components/Stats.tsx"
+  ],
+  "declarations": [
+   "modified function MetricCard src/components/MetricCard.tsx body",
+   "unknown function Stats src/components/Stats.tsx"
+  ],
+  "impacts": {
+   "MetricCard": {
+    "direct": [
+     "src/components/Stats.tsx:7 REFERENCES(JSX) Stats base"
+    ],
+    "possible": [
+     "unanalysed src/broken.test.tsx",
+     "unanalysed src/components/Stats.tsx"
+    ],
+    "complete": false
+   },
+   "Stats": {
+    "direct": [
+     "src/pages/Dashboard.tsx:4 REFERENCES(JSX) Dashboard base"
+    ],
+    "complete": false
+   }
+  },
+  "rebound_contains": [
+   "src/pages/Dashboard.tsx:4 REFERENCES(JSX) Stats resolved->unresolved"
+  ],
+  "complete": false,
+  "truncated": false
+ }
+}

@@ -11,6 +11,8 @@ code-intel-store.workspace = true
 anyhow.workspace = true
 blake3.workspace = true
 ignore.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tree-sitter.workspace = true
 tree-sitter-typescript.workspace = true
 

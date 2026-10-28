@@ -1,0 +1,58 @@
+{
+ "mode": "worktree",
+ "args": [],
+ "delete": [],
+ "rename": [
+  [
+   "src/lib/math.ts",
+   "src/lib/arith.ts"
+  ]
+ ],
+ "expected": {
+  "files": [
+   "M src/components/Stats.tsx unstaged",
+   "A src/lib/arith.ts untracked",
+   "M src/lib/index.ts unstaged",
+   "D src/lib/math.ts unstaged",
+   "M src/lib/stats.ts unstaged"
+  ],
+  "declarations": [
+   "added function add src/lib/arith.ts",
+   "added function double src/lib/arith.ts",
+   "removed function add src/lib/math.ts",
+   "removed function double src/lib/math.ts"
+  ],
+  "impacts": {
+   "double src/lib/math.ts removed": {
+    "direct": [
+     "src/components/Stats.tsx:7 CALLS Stats base"
+    ],
+    "transitive": [
+     "Dashboard 2"
+    ]
+   },
+   "double src/lib/arith.ts added": {
+    "direct": [
+     "src/components/Stats.tsx:7 CALLS Stats head"
+    ],
+    "transitive": [
+     "Dashboard 2"
+    ]
+   },
+   "add src/lib/math.ts removed": {
+    "direct": [
+     "src/lib/math.ts:6 CALLS double base",
+     "src/lib/stats.ts:3 CALLS sum base"
+    ]
+   },
+   "add src/lib/arith.ts added": {
+    "direct": [
+     "src/lib/arith.ts:6 CALLS double head",
+     "src/lib/stats.ts:3 CALLS sum head"
+    ]
+   }
+  },
+  "complete": true,
+  "truncated": false
+ }
+}

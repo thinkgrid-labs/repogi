@@ -8,7 +8,10 @@ license.workspace = true
 [dependencies]
 code-intel-core.workspace = true
 code-intel-store.workspace = true
+code-intel-index.workspace = true
 anyhow.workspace = true
+blake3.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [lints]

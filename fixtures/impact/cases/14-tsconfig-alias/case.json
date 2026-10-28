@@ -1,0 +1,23 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M tsconfig.json config"
+  ],
+  "declarations": [],
+  "modules": [],
+  "impacts": {},
+  "resolution_changed": true,
+  "rebound": [
+   "src/components/MetricCard.tsx:1 IMPORTS formatNumber resolved->unresolved",
+   "src/components/MetricCard.tsx:4 CALLS formatNumber resolved->unresolved",
+   "src/components/Stats.tsx:1 IMPORTS MetricCard resolved->unresolved",
+   "src/components/Stats.tsx:7 REFERENCES(JSX) MetricCard resolved->unresolved"
+  ],
+  "complete": true,
+  "truncated": false
+ }
+}

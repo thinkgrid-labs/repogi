@@ -1,0 +1,32 @@
+{
+ "mode": "commit",
+ "args": [
+  "--depth",
+  "4"
+ ],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/cycle-a.ts"
+  ],
+  "declarations": [
+   "modified function a src/lib/cycle-a.ts body"
+  ],
+  "modules": [],
+  "impacts": {
+   "a": {
+    "direct": [
+     "src/lib/cycle-b.ts:4 CALLS b both"
+    ],
+    "import_only": [],
+    "transitive": [],
+    "possible": [],
+    "complete": true
+   }
+  },
+  "rebound": [],
+  "complete": true,
+  "truncated": false
+ }
+}

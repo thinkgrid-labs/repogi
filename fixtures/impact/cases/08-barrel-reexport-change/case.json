@@ -1,0 +1,22 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/index.ts"
+  ],
+  "declarations": [],
+  "modules": [
+   "src/lib/index.ts exports"
+  ],
+  "impacts": {},
+  "rebound": [
+   "src/components/MetricCard.tsx:1 IMPORTS formatNumber resolved src/lib/format.ts#formatNumber->resolved src/legacy/format.ts#formatNumber",
+   "src/components/MetricCard.tsx:4 CALLS formatNumber resolved src/lib/format.ts#formatNumber->resolved src/legacy/format.ts#formatNumber"
+  ],
+  "complete": true,
+  "truncated": false
+ }
+}

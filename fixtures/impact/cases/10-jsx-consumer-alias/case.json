@@ -1,0 +1,41 @@
+{
+ "mode": "worktree",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/components/MetricCard.tsx unstaged",
+   "A src/pages/Overview.tsx untracked"
+  ],
+  "declarations": [
+   "modified function MetricCard src/components/MetricCard.tsx signature",
+   "added function Overview src/pages/Overview.tsx"
+  ],
+  "impacts": {
+   "MetricCard": {
+    "direct": [
+     "src/components/Stats.tsx:7 REFERENCES(JSX) Stats both",
+     "src/pages/Overview.tsx:4 REFERENCES(JSX) Overview head"
+    ],
+    "import_only": [],
+    "transitive": [
+     "Dashboard 2"
+    ],
+    "possible": [
+     "unanalysed src/broken.test.tsx"
+    ],
+    "complete": false
+   },
+   "Overview": {
+    "direct": [],
+    "transitive": [],
+    "possible": [],
+    "complete": true
+   }
+  },
+  "rebound": [],
+  "complete": false,
+  "truncated": false
+ }
+}

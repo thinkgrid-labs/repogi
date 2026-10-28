@@ -1,0 +1,18 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts"
+  ],
+  "declarations": [],
+  "modules": [],
+  "impacts": {},
+  "rebound": [],
+  "unchanged_declarations": 3,
+  "complete": true,
+  "truncated": false
+ }
+}

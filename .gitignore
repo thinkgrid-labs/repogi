@@ -1,3 +1,7 @@
 /target/
 .code-intel/
+__pycache__/
 
+docs/
+benchmarks/
+/AGENTS.md

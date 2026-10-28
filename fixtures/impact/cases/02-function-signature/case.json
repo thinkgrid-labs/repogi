@@ -1,0 +1,34 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts"
+  ],
+  "declarations": [
+   "modified function formatNumber src/lib/format.ts signature"
+  ],
+  "modules": [],
+  "impacts": {
+   "formatNumber": {
+    "direct": [
+     "src/components/MetricCard.tsx:4 CALLS MetricCard both"
+    ],
+    "import_only": [],
+    "transitive": [
+     "Stats 2"
+    ],
+    "possible": [],
+    "complete": true
+   }
+  },
+  "rebound": [],
+  "absent_paths": [
+   "src/legacy/old.ts"
+  ],
+  "complete": true,
+  "truncated": false
+ }
+}

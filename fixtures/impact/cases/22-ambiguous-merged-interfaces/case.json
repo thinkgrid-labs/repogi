@@ -1,0 +1,19 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/shapes.ts"
+  ],
+  "declarations": [],
+  "declarations_repeated": [
+   "modified interface Options src/lib/shapes.ts uncertain",
+   "modified interface Options src/lib/shapes.ts uncertain"
+  ],
+  "complete": true,
+  "truncated": false
+ },
+ "note": "Both `interface Options` declarations change; neither text survives, so the pairing is by position and must be reported as uncertain."
+}

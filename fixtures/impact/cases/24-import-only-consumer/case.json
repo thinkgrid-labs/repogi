@@ -1,0 +1,33 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts",
+   "A src/pages/Unused.tsx"
+  ],
+  "declarations": [
+   "modified function formatDate src/lib/format.ts body",
+   "added variable unusedLabel src/pages/Unused.tsx"
+  ],
+  "impacts": {
+   "formatDate": {
+    "direct": [
+     "src/pages/Report.tsx:7 CALLS Report both"
+    ],
+    "import_only": [
+     "src/pages/Unused.tsx:1 IMPORTS module head"
+    ],
+    "possible": [
+     "src/dynamic.ts:2 CALLS formatter.formatDate"
+    ],
+    "complete": false
+   }
+  },
+  "complete": false,
+  "truncated": false
+ },
+ "note": "A new file imports formatDate without using it: an import-only dependent, kept apart from the real caller."
+}

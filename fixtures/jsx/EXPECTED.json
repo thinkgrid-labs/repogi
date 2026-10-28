@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Hand-written JSX component references for fixtures/jsx (independent of Atlas). One entry per opening/self-closing component tag; closing tags and intrinsic elements produce none.",
+  "confirmed": [
+    {"owner": "App", "tag": "Panel", "line": 15, "target": ["src/widgets/Panel.tsx", "Panel"], "scenario": "alias import (@/)"},
+    {"owner": "App", "tag": "Button", "line": 16, "target": ["src/components/Button.tsx", "Button"], "scenario": "direct relative import"},
+    {"owner": "App", "tag": "PrimaryButton", "line": 17, "target": ["src/components/Button.tsx", "Button"], "scenario": "renamed import; closing tag not counted"},
+    {"owner": "App", "tag": "Card", "line": 18, "target": ["src/components/Card.tsx", "Card"], "scenario": "default export; nested JSX"},
+    {"owner": "App", "tag": "BarrelCard", "line": 21, "target": ["src/components/Card.tsx", "Card"], "scenario": "barrel re-export of a default, renamed"},
+    {"owner": "App", "tag": "Icons.Star", "line": 22, "target": ["src/components/Icons.tsx", "Star"], "scenario": "namespace-qualified JSX"},
+    {"owner": "useRenderer", "tag": "Button", "line": 37, "target": ["src/components/Button.tsx", "Button"], "scenario": "JSX inside a closure in a hook"},
+    {"owner": "WithDefault", "tag": "Card", "line": 45, "target": ["src/components/Card.tsx", "Card"], "scenario": "JSX in a destructured parameter's default value (not a local binding)"},
+    {"owner": "Themed", "tag": "Button", "line": 54, "target": ["src/components/Button.tsx", "Button"], "scenario": "child of a context provider"}
+  ],
+  "not_confirmed": [
+    {"owner": "App", "tag": "Toaster", "line": 23, "status": "unsupported", "scenario": "package component"},
+    {"owner": "App", "tag": "Ambig", "line": 24, "status": "ambiguous", "scenario": "ambiguous module (Ambig.tsx and Ambig/index.tsx)"},
+    {"owner": "App", "tag": "TypedThing", "line": 25, "status": "unsupported", "scenario": "type-only import"},
+    {"owner": "Shadowing", "tag": "Shadowed", "line": 33, "status": "unsupported", "scenario": "local binding shadows the imported component; nested local declarations are not targets"},
+    {"owner": "TypeAsTag", "tag": "PanelProps", "line": 42, "status": "unsupported", "scenario": "a type (interface) cannot be a rendered component"},
+    {"owner": "Themed", "tag": "ThemeContext.Provider", "line": 53, "status": "unsupported", "scenario": "property of a package value (createContext); the receiver ThemeContext is a separate, resolved plain REFERENCES"}
+  ],
+  "no_jsx_reference": ["button", "div", "svg", "em", "section", "p", "span", "i", "my-element"]
+}

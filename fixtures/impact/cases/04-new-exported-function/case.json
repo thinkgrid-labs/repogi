@@ -1,0 +1,27 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts"
+  ],
+  "declarations": [
+   "added function formatPercent src/lib/format.ts"
+  ],
+  "modules": [],
+  "impacts": {
+   "formatPercent": {
+    "direct": [],
+    "import_only": [],
+    "transitive": [],
+    "possible": [],
+    "complete": true
+   }
+  },
+  "rebound": [],
+  "complete": true,
+  "truncated": false
+ }
+}

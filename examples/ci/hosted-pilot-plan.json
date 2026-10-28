@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "status": "UNAUTHORIZED_INCOMPLETE_PROPOSAL",
+  "configuration": {
+    "target": {
+      "alias": "external-pilot-1",
+      "repository": null,
+      "private": true,
+      "is_fork": false,
+      "base": null,
+      "head": null,
+      "private_provenance": "ignored local Phase 4.12 selection; no hosted repository or commits selected"
+    },
+    "actions": {
+      "actions/checkout": {
+        "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "release": "v7.0.1",
+        "reviewed": true,
+        "review_record": "examples/ci/reviewed-action-pins.json"
+      },
+      "actions/upload-artifact": {
+        "commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+        "release": "v7.0.2",
+        "reviewed": true,
+        "review_record": "examples/ci/reviewed-action-pins.json"
+      }
+    },
+    "workflow": {
+      "event": "workflow_dispatch",
+      "runner": "ubuntu-24.04",
+      "permissions": {
+        "contents": "read"
+      },
+      "persist_credentials": false,
+      "detached_checkout": true,
+      "project_scripts": false,
+      "fork_policy": "deny",
+      "source_revision": null,
+      "source_reviewed": false
+    },
+    "executable": {
+      "strategy": "trusted-release",
+      "source_repository": null,
+      "source_revision": null,
+      "source_reviewed": false,
+      "build_environment": null,
+      "dependency_lock_sha256": null,
+      "url": null,
+      "sha256": null,
+      "provenance_approved": false,
+      "independent_trust_anchor": null,
+      "tested_local_sha256_reference_only": "841e86f1aa617750f0aab6b916257d622bd001859a3b36596b09860d71825c7a"
+    },
+    "verifier": {
+      "source_repository": null,
+      "source_revision": null,
+      "source_reviewed": false,
+      "consumer_sha256": null,
+      "ci_helper_sha256": null,
+      "hash_provider_url": null,
+      "hash_provider_sha256": null,
+      "hash_provider_approved": false
+    },
+    "publication": {
+      "authorized": false,
+      "allowed_repositories": [],
+      "visibility": "repository-readers",
+      "visibility_approved": false,
+      "retention_days": 7,
+      "retention_approved": false,
+      "fork_artifacts": false,
+      "privacy_reviewed": false,
+      "destination": "current-private-repository-run",
+      "retain_identities_via": "separate-protected-approval-record"
+    },
+    "limits": {
+      "hosted_executions": 1,
+      "charges_acknowledged": false,
+      "timeout_minutes": 15
+    },
+    "data_export": {
+      "contents": [
+        "complete schema-1 manifest",
+        "small integrity record"
+      ],
+      "excluded": [
+        "source bodies",
+        "environment/credential values",
+        "repository cache",
+        "project runner output"
+      ],
+      "sensitive": [
+        "relative paths",
+        "declaration and test names",
+        "dependency relationships",
+        "verification gaps"
+      ],
+      "policy": "no publication until explicitly approved"
+    },
+    "failure_and_rollback": {
+      "on_verification_failure": "no final bundle and no upload",
+      "on_hosted_validation_failure": "stop; no automatic retry, merge decision or permission increase",
+      "after_single_run": "owner disables/removes approved temporary workflow and deletes artifacts if policy requires; no rollout without renewed approval"
+    },
+    "evidence_to_collect": [
+      "resolved object availability and detached head",
+      "selected executable/provenance and hashes",
+      "CLI/independent identity equality",
+      "publication denied after failure",
+      "approved artifact retention/access observations"
+    ],
+    "material_change_policy": "pins, executable/source, verifier, runner, permissions, revisions, destination, visibility/retention and candidate bytes require a new fingerprint and renewed approval",
+    "files_sha256": {
+      "examples/ci/verification-manifest-hosted.yml.example": "0a934dc1c1e0ca9fc2e62ca54b0f7bec7483da15c7c6fd717e04cc531bfe81da",
+      "examples/ci/deployment_preflight.py": "42815ed4925da48acfeb12b04ab480a1ed7bf8463f1d346bb8aab7f22f0e3225",
+      "examples/ci/reviewed-action-pins.json": "ef00880477e57b6d64fc5624cc2eec808ab92ad41224a938648e112be657ebf9"
+    }
+  },
+  "configuration_sha256": "100fd76a948c9d4cabdd8a8f63efb0bc6b0eac5d1119599d3850716054aafd8e",
+  "authorization": {
+    "hosted_execution_approved": false,
+    "approved_configuration_sha256": null,
+    "approval_record": null
+  }
+}

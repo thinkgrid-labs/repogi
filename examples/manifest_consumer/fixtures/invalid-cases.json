@@ -1,0 +1,91 @@
+[
+ {
+  "target": "descriptor",
+  "path": [
+   "kind"
+  ],
+  "value": "manifest",
+  "expected_code": "descriptor"
+ },
+ {
+  "target": "descriptor",
+  "path": [
+   "transport_version"
+  ],
+  "value": 2,
+  "expected_code": "transport_version"
+ },
+ {
+  "target": "descriptor",
+  "path": [
+   "schema_version"
+  ],
+  "value": 2,
+  "expected_code": "schema_version"
+ },
+ {
+  "target": "descriptor",
+  "path": [
+   "total_bytes"
+  ],
+  "value": 0,
+  "expected_code": "length"
+ },
+ {
+  "target": "descriptor",
+  "path": [
+   "retrieval",
+   "offset_unit"
+  ],
+  "value": "characters",
+  "expected_code": "descriptor"
+ },
+ {
+  "target": "chunk",
+  "path": [
+   "offset"
+  ],
+  "value": 1,
+  "expected_code": "range"
+ },
+ {
+  "target": "chunk",
+  "path": [
+   "next_offset"
+  ],
+  "value": 0,
+  "expected_code": "range"
+ },
+ {
+  "target": "chunk",
+  "path": [
+   "decoded_bytes"
+  ],
+  "value": 0,
+  "expected_code": "length"
+ },
+ {
+  "target": "chunk",
+  "path": [
+   "data"
+  ],
+  "value": "!!!!",
+  "expected_code": "base64"
+ },
+ {
+  "target": "chunk",
+  "path": [
+   "total_bytes"
+  ],
+  "value": 0,
+  "expected_code": "chunk_metadata"
+ },
+ {
+  "target": "chunk",
+  "path": [
+   "final"
+  ],
+  "value": false,
+  "expected_code": "range"
+ }
+]

@@ -1,0 +1,27 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts"
+  ],
+  "declarations": [
+   "modified function unusedHelper src/lib/format.ts body"
+  ],
+  "modules": [],
+  "impacts": {
+   "unusedHelper": {
+    "direct": [],
+    "import_only": [],
+    "transitive": [],
+    "possible": [],
+    "complete": true
+   }
+  },
+  "rebound": [],
+  "complete": true,
+  "truncated": false
+ }
+}

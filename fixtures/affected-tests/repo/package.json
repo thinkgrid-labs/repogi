@@ -1,0 +1,1 @@
+{"directories": {"test": "integration"}, "scripts": {"test": "touch ATLAS_MUST_NOT_RUN"}}

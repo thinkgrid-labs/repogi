@@ -1,0 +1,1 @@
+throw new Error("ATLAS_MUST_NOT_EVALUATE_CONFIG");

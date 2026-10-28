@@ -4,9 +4,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "Repogi (Repo Graph Intelligence): local-first code intelligence for AI coding agents"
+repository = "https://github.com/thinkgrid-labs/repogi"
 
 [[bin]]
-name = "code-intel"
+name = "repogi"
 path = "src/main.rs"
 
 [dependencies]
@@ -16,7 +18,13 @@ code-intel-index.workspace = true
 code-intel-retrieval.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+blake3.workspace = true
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 tempfile.workspace = true

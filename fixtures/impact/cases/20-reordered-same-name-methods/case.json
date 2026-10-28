@@ -1,0 +1,19 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/shapes.ts"
+  ],
+  "declarations": [
+   "modified class Square src/lib/shapes.ts body",
+   "modified method Square.area src/lib/shapes.ts body"
+  ],
+  "modules": [],
+  "complete": true,
+  "truncated": false
+ },
+ "note": "Classes swapped; only Square.area's body changed. Circle and Circle.area keep their identity (identical text); Square.area is matched as the only Square.area."
+}

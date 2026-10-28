@@ -1,0 +1,4 @@
+{
+  // Path alias used by App.tsx (`@/widgets/Panel`, `@/components`).
+  "compilerOptions": { "jsx": "react-jsx", "paths": { "@/*": ["./src/*"] } }
+}

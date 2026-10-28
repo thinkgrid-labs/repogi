@@ -1,0 +1,29 @@
+{
+ "mode": "staged",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts staged+unstaged"
+  ],
+  "declarations": [
+   "modified function formatNumber src/lib/format.ts body",
+   "modified function unusedHelper src/lib/format.ts body"
+  ],
+  "impacts": {
+   "formatNumber": {
+    "direct": [
+     "src/components/MetricCard.tsx:4 CALLS MetricCard both"
+    ],
+    "complete": true
+   },
+   "unusedHelper": {
+    "direct": [],
+    "complete": true
+   }
+  },
+  "complete": true,
+  "truncated": false
+ }
+}

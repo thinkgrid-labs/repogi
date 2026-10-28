@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "repogi": {
+      "type": "stdio",
+      "command": "/abs/path/to/checkout/target/release/repogi",
+      "args": ["mcp", "--root", "/abs/path/to/repo", "--profile", "full", "--tools", "atlas_context,atlas_symbol,atlas_references,atlas_dependencies,atlas_impact,atlas_status"]
+    }
+  }
+}

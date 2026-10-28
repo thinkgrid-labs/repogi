@@ -1,0 +1,49 @@
+{
+ "artifact_id": "blake3:a20cde79f546a3524e06f877625583ec1b03e6940945182fe088a1071a70e639",
+ "availability": "retained",
+ "digest_algorithm": "blake3-256",
+ "envelope_digest": "blake3:a20cde79f546a3524e06f877625583ec1b03e6940945182fe088a1071a70e639",
+ "is_manifest": false,
+ "kind": "verification_manifest_descriptor",
+ "manifest_id": "blake3:1b0e46596166a99742ccc69f4e4b0470a7b0dd195db3f3ff2348606247021dfb",
+ "protocol": "atlas-manifest-bytes",
+ "retrieval": {
+  "advance_by": "next_offset",
+  "arguments": {
+   "artifact": {
+    "id": "blake3:a20cde79f546a3524e06f877625583ec1b03e6940945182fe088a1071a70e639",
+    "length": 16000,
+    "offset": 0
+   }
+  },
+  "encoding": "base64",
+  "max_chunk_bytes": 16000,
+  "offset_unit": "decoded_bytes",
+  "tool": "atlas_impact"
+ },
+ "schema_version": 1,
+ "snapshots": {
+  "base": {
+   "commit": "22254897f4517949b96fa94b3851daa0f3a89575",
+   "file_manifest_digest": "fae0fbf3f322bb24e6bc7d45168aaf05def84c1cfc6c9da0c1040a0d9c18d294",
+   "kind": "commit",
+   "requested": "HEAD",
+   "resolution_digest": "45c243b78c7e0a81e4909af5c0a26123ef9c4d2a2b5f27f50e6a5df257acc150",
+   "source_digest": "6e178a9338daf05d98f5646929a7da0e0d42bdb5e194ae1511196ecc2f4a7ae6",
+   "test_inventory_digest": "6a4f66ff8d211ef49909130c3f5da133195ac20df5210daa59e5aeba718e8d0b",
+   "tree": "d7781285c26439513fdca12c51af75afec28e5b8"
+  },
+  "head": {
+   "commit": null,
+   "file_manifest_digest": "2ac547b26424057d68557fb3c245b15038248cee950b93f432de6686704869b2",
+   "kind": "worktree",
+   "requested": null,
+   "resolution_digest": "45c243b78c7e0a81e4909af5c0a26123ef9c4d2a2b5f27f50e6a5df257acc150",
+   "source_digest": "0297cec17674d631fa43a4c2cdb8d337bd764f161c471c7c0f418f071bc0fee9",
+   "test_inventory_digest": "010bf1e63b9fb8be4905281d26173f8a3a4f3aeef9bcd34a77efc0db70d23a63",
+   "tree": null
+  }
+ },
+ "total_bytes": 5817,
+ "transport_version": 1
+}

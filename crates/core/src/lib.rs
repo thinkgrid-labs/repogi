@@ -1,6 +1,8 @@
 //! Serializable Phase 0 facts and command responses. Line ranges are inclusive, one based.
 use serde::{Deserialize, Serialize};
 
+pub mod semantic;
+
 pub const SCHEMA_VERSION: u32 = 1;
 pub const MAX_FILE_BYTES: u64 = 1_048_576;
 
@@ -25,6 +27,14 @@ pub struct Fact {
     pub end_line: usize,
     pub snippet: String,
     pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<Signature>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Signature {
+    pub snippet: String,
+    pub end_line: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +44,12 @@ pub struct Edge {
     pub target_text: Option<String>,
     pub kind: String,
     pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<semantic::Resolution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<semantic::Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<semantic::Location>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +61,7 @@ pub struct IndexedFile {
     pub syntax_error: bool,
     pub facts: Vec<Fact>,
     pub edges: Vec<Edge>,
+    pub semantic: semantic::Module,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,6 +81,10 @@ pub struct IndexReport {
     pub files_skipped: usize,
     pub syntax_error_files: usize,
     pub diagnostics: Vec<Diagnostic>,
+    /// The module-resolution settings (tsconfig/jsconfig) differed from the
+    /// indexed ones, so every cached module was rebound without reparsing.
+    #[serde(default)]
+    pub resolution_changed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,6 +99,26 @@ pub struct Status {
     pub last_run: Option<IndexReport>,
 }
 
+/// Read-only comparison of eligible source files against an indexed snapshot.
+/// Paths are sorted; lists are capped by the caller-supplied sample limit.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Freshness {
+    pub fresh: bool,
+    pub files_checked: usize,
+    pub changed: usize,
+    pub added: usize,
+    pub removed: usize,
+    pub skipped: usize,
+    pub sample: Vec<String>,
+    /// Module-resolution settings differ from the indexed ones (graph is stale
+    /// even when every source file is unchanged).
+    #[serde(default)]
+    pub resolution_changed: bool,
+    /// The cached syntax IR predates the current extractor (re-index reparses it).
+    #[serde(default)]
+    pub semantic_ir_outdated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextItem {
     pub id: String,
@@ -90,15 +131,19 @@ pub struct ContextItem {
     pub why: Vec<String>,
     pub confidence: String,
     pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Budget {
     pub max_tokens: usize,
     pub method: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextResponse {
     pub schema_version: u32,
     pub query: String,
@@ -110,6 +155,26 @@ pub struct ContextResponse {
     pub omitted_items: usize,
     pub candidate_limit_reached: bool,
     pub syntax_error_files: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relationships: Vec<Edge>,
+    /// Additive agent-facing evidence contract. Frozen ranking controls may
+    /// omit it; CLI/MCP navigation adapters attach it before final budgeting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation: Option<NavigationEvidence>,
+}
+
+/// Point-in-time checks of returned source bytes, never whole-graph freshness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NavigationEvidence {
+    pub source: String,
+    pub current_source: String,
+    pub checked_files: usize,
+    pub unchecked_files: usize,
+    pub changed_files: Vec<String>,
+    pub graph_freshness: String,
+    pub supported_extensions: Vec<String>,
 }
 
 #[must_use]

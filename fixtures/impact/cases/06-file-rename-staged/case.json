@@ -1,0 +1,29 @@
+{
+ "mode": "staged",
+ "args": [],
+ "delete": [],
+ "rename": [
+  [
+   "src/lib/math.ts",
+   "src/lib/arith.ts"
+  ]
+ ],
+ "expected": {
+  "files": [
+   "M src/components/Stats.tsx staged",
+   "R src/lib/arith.ts<-src/lib/math.ts staged",
+   "M src/lib/index.ts staged",
+   "M src/lib/stats.ts staged"
+  ],
+  "declarations": [],
+  "modules": [
+   "src/components/Stats.tsx imports",
+   "src/lib/index.ts exports",
+   "src/lib/stats.ts imports"
+  ],
+  "impacts": {},
+  "rebound": [],
+  "complete": true,
+  "truncated": false
+ }
+}

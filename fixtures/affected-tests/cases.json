@@ -1,0 +1,860 @@
+{
+ "schema_version": 1,
+ "description": "Independent source-reviewed file/target/depth labels. Test bodies call the imports shown in repo; overload/dispatch inference is not used. Never generated from Atlas.",
+ "cases": [
+  {
+   "id": "function-and-unit",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "src/math.test.ts",
+    "tests/collision/math.test.ts",
+    "tests/unused.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "transitive-integration",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 3"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "src/math.test.ts",
+    "tests/collision/math.test.ts",
+    "tests/unused.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "react-tsx",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/Card.tsx",
+     "old": "<div>",
+     "new": "<section>"
+    },
+    {
+     "path": "src/Card.tsx",
+     "old": "</div>",
+     "new": "</section>"
+    }
+   ],
+   "confirmed": {
+    "tests/component.test.tsx": {
+     "depth": 1,
+     "target": "src/Card.tsx",
+     "name": "Card"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "deleted-export",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "export function calc(n: number) { return n + 1; }\n",
+     "new": ""
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "src/math.test.ts",
+    "tests/collision/math.test.ts",
+    "tests/unused.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ],
+   "baseline_only_evidence": true
+  },
+  {
+   "id": "renamed-declaration",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "function calc(",
+     "new": "function total("
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/renamed.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "total"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "src/math.test.ts",
+    "tests/collision/math.test.ts",
+    "tests/unused.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ],
+   "writes": {
+    "tests/renamed.test.ts": "import { total } from '../src/math';\ntest('new name', () => total(1));\n"
+   }
+  },
+  {
+   "id": "barrel-retarget",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/barrel.ts",
+     "old": "'./math'",
+     "new": "'./other/math'"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/other/math.ts",
+     "name": "calc"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "path-alias-retarget",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "tsconfig.json",
+     "old": "./src/*",
+     "new": "./src/other/*"
+    }
+   ],
+   "confirmed": {
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/other/math.ts",
+     "name": "calc"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "file-rename",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/numbers.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    },
+    {
+     "path": "src/barrel.ts",
+     "old": "'./math'",
+     "new": "'./numbers'"
+    },
+    {
+     "path": "src/wrapper.ts",
+     "old": "'./math'",
+     "new": "'./numbers'"
+    },
+    {
+     "path": "tests/alias.test.ts",
+     "old": "'@lib/math'",
+     "new": "'@lib/numbers'"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/numbers.ts",
+     "name": "calc",
+     "base_target": "src/math.ts"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/numbers.ts",
+     "name": "calc",
+     "base_target": "src/math.ts"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/numbers.ts",
+     "name": "calc",
+     "base_target": "src/math.ts"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/numbers.ts",
+     "name": "calc",
+     "base_target": "src/math.ts"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ],
+   "renames": [
+    [
+     "src/math.ts",
+     "src/numbers.ts"
+    ]
+   ]
+  },
+  {
+   "id": "test-helper-through-barrel",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "tests/helpers/run.ts",
+     "old": "calc(1)",
+     "new": "calc(2)"
+    }
+   ],
+   "confirmed": {
+    "tests/helper-consumer.test.ts": {
+     "depth": 1,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "test-naming-collision",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "src/math.test.ts",
+    "tests/collision/math.test.ts",
+    "tests/unused.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ],
+   "wrong_targets": [
+    "tests/collision/math.test.ts",
+    "src/math.test.ts"
+   ]
+  },
+  {
+   "id": "unrelated-colocated-test",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "src/math.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "dynamic-unsupported",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "syntax-error-test",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [
+    "tests/broken.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "no-known-test-consumer",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "return 42",
+     "new": "return 43"
+    }
+   ],
+   "confirmed": {},
+   "possible": [
+    "src/math.test.ts",
+    "tests/collision/math.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "test-added-and-removed",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/new.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ],
+   "deletes": [
+    "tests/math.test.ts"
+   ],
+   "writes": {
+    "tests/new.test.ts": "import { calc } from '../src/math';\ntest('new', () => calc(1));\n"
+   },
+   "presence": {
+    "tests/math.test.ts": [
+     "base"
+    ],
+    "tests/new.test.ts": [
+     "head"
+    ]
+   }
+  },
+  {
+   "id": "large-test-fanout",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "n + 1",
+     "new": "n + 2"
+    }
+   ],
+   "confirmed": {
+    "tests/math.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/alias.test.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "__tests__/directory.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "integration/custom.ts": {
+     "depth": 1,
+     "target": "src/math.ts",
+     "name": "calc"
+    },
+    "tests/integration.spec.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    },
+    "tests/helper-consumer.test.ts": {
+     "depth": 2,
+     "target": "tests/helpers/run.ts",
+     "name": "runTest"
+    },
+    "tests/enclosed.test.ts": {
+     "depth": 2,
+     "target": "src/wrapper.ts",
+     "name": "process"
+    }
+   },
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ],
+   "fanout": 240
+  },
+  {
+   "id": "uncertain-barrel-loss",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/barrel.ts",
+     "old": "export { calc as compute } from './math';",
+     "new": "export * from './missing';"
+    }
+   ],
+   "confirmed": {},
+   "possible": [
+    "tests/math.test.ts"
+   ],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  },
+  {
+   "id": "negative-control",
+   "mode": "commit",
+   "edits": [
+    {
+     "path": "src/math.ts",
+     "old": "export function calc",
+     "new": "// comment-only control\nexport function calc"
+    }
+   ],
+   "confirmed": {},
+   "possible": [],
+   "unknown": [
+    "tests/broken.test.ts",
+    "tests/dynamic.test.js",
+    "generated/excluded.test.ts",
+    "ignored/tracked.test.ts"
+   ]
+  }
+ ]
+}

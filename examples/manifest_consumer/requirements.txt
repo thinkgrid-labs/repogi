@@ -1,0 +1,4 @@
+# SDK used by the offline interoperability run. verify mode needs no SDK.
+mcp==2.3.0
+# Optional: use --digest-command for an independently built upstream BLAKE3 oracle.
+# blake3>=1,<2

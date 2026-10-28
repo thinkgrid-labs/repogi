@@ -33,7 +33,7 @@ fn fixture() -> TempDir {
 }
 
 fn run(root: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_code-intel"))
+    Command::new(env!("CARGO_BIN_EXE_repogi"))
         .current_dir(root)
         .args(arguments)
         .output()
@@ -163,13 +163,11 @@ fn warm_index_skips_parsing_and_keeps_revision_and_context_stable() {
     assert_eq!(second.index_revision, 1);
     assert_eq!(second.syntax_error_files, 1);
     assert_eq!(scalar(root.path(), "SELECT count(*) FROM index_runs"), 2);
-    assert_eq!(
-        before,
-        success(
-            root.path(),
-            &["context", "authenticate", "--max-tokens", "8000"]
-        )
+    let after = success(
+        root.path(),
+        &["context", "authenticate", "--max-tokens", "8000"],
     );
+    assert_eq!(before, after);
 }
 
 #[test]
@@ -394,7 +392,7 @@ fn invalid_queries_and_missing_index_have_actionable_machine_readable_errors() {
         error["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("code-intel index")
+            .contains("repogi index")
     );
     index(root.path());
     for args in [
@@ -474,13 +472,25 @@ fn failed_transaction_keeps_the_entire_previous_index() {
     assert!(!output.status.success());
     assert_eq!(status(root.path()).index_revision, 1);
     assert_eq!(status(root.path()).files, 5);
-    assert_eq!(
-        before,
-        success(
-            root.path(),
-            &["context", "authenticate", "--max-tokens", "8000"]
-        )
+    let after = success(
+        root.path(),
+        &["context", "authenticate", "--max-tokens", "8000"],
     );
+    let mut previous: serde_json::Value = serde_json::from_str(&before).unwrap();
+    let mut current: serde_json::Value = serde_json::from_str(&after).unwrap();
+    assert_eq!(previous["navigation"]["current_source"], "matched_at_read");
+    assert_eq!(current["navigation"]["current_source"], "stale");
+    assert_eq!(
+        current["navigation"]["changed_files"],
+        serde_json::json!(["src/auth.ts", "src/types.ts"])
+    );
+    // Indexed facts survive the failed transaction, while source checks disclose
+    // the edited/deleted working-tree files.
+    for response in [&mut previous, &mut current] {
+        response.as_object_mut().unwrap().remove("navigation");
+        response.as_object_mut().unwrap().remove("estimated_tokens");
+    }
+    assert_eq!(previous, current);
 }
 
 #[test]

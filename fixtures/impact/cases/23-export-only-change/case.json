@@ -1,0 +1,32 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts"
+  ],
+  "declarations": [
+   "modified function formatDate src/lib/format.ts exports"
+  ],
+  "impacts": {
+   "formatDate": {
+    "direct": [
+     "src/pages/Report.tsx:7 CALLS Report base"
+    ],
+    "possible": [
+     "src/dynamic.ts:2 CALLS formatter.formatDate"
+    ],
+    "complete": false
+   }
+  },
+  "rebound": [
+   "src/pages/Report.tsx:2 IMPORTS formatDate resolved->unresolved",
+   "src/pages/Report.tsx:7 CALLS formatDate resolved->unresolved"
+  ],
+  "complete": false,
+  "truncated": false
+ },
+ "note": "Body unchanged; only the export was dropped. The previous caller (base graph) is kept and its bindings are lost in the head graph."
+}

@@ -1,0 +1,30 @@
+{
+ "mode": "commit",
+ "args": [
+  "--depth",
+  "3",
+  "--max-results",
+  "1"
+ ],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/math.ts"
+  ],
+  "declarations": [
+   "modified function add src/lib/math.ts body"
+  ],
+  "impacts": {
+   "add": {
+    "direct_count": 1,
+    "omitted": {
+     "direct": 1
+    },
+    "complete": false
+   }
+  },
+  "complete": false,
+  "truncated": true
+ }
+}

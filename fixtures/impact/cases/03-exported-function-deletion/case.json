@@ -1,0 +1,34 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/format.ts"
+  ],
+  "declarations": [
+   "removed function formatDate src/lib/format.ts"
+  ],
+  "modules": [],
+  "impacts": {
+   "formatDate": {
+    "direct": [
+     "src/pages/Report.tsx:7 CALLS Report base"
+    ],
+    "import_only": [],
+    "transitive": [],
+    "possible": [
+     "src/dynamic.ts:2 CALLS formatter.formatDate"
+    ],
+    "complete": false
+   }
+  },
+  "rebound": [
+   "src/pages/Report.tsx:2 IMPORTS formatDate resolved->unresolved",
+   "src/pages/Report.tsx:7 CALLS formatDate resolved->unresolved"
+  ],
+  "complete": false,
+  "truncated": false
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "mode": "commit",
+ "args": [],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/shapes.ts"
+  ],
+  "declarations": [
+   "modified function parse src/lib/shapes.ts body"
+  ],
+  "complete": true,
+  "truncated": false
+ },
+ "note": "Three `parse` facts (two signatures and the implementation): the signatures match by identical text, the implementation is the single remaining one on each side."
+}

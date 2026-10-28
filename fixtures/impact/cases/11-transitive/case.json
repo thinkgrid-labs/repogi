@@ -1,0 +1,36 @@
+{
+ "mode": "commit",
+ "args": [
+  "--depth",
+  "3"
+ ],
+ "delete": [],
+ "rename": [],
+ "expected": {
+  "files": [
+   "M src/lib/math.ts"
+  ],
+  "declarations": [
+   "modified function add src/lib/math.ts body"
+  ],
+  "modules": [],
+  "impacts": {
+   "add": {
+    "direct": [
+     "src/lib/math.ts:6 CALLS double both",
+     "src/lib/stats.ts:3 CALLS sum both"
+    ],
+    "import_only": [],
+    "transitive": [
+     "Stats 2",
+     "Dashboard 3"
+    ],
+    "possible": [],
+    "complete": true
+   }
+  },
+  "rebound": [],
+  "complete": true,
+  "truncated": false
+ }
+}

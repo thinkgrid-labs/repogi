@@ -1,0 +1,1 @@
+importOriginal<typeof import('./module')>();
