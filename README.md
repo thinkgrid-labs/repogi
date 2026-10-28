@@ -1,412 +1,313 @@
 <div align="center">
+  <img src="assets/repogi-banner.svg" alt="Repogi — Repo Graph Intelligence. Know the code. Follow the evidence. A local-first code intelligence tool built in Rust." width="100%" />
 
-# Repogi
+# Repogi — Repo Graph Intelligence
 
-**Repo Graph Intelligence**
+**Local-first code intelligence and dependency graph analysis for AI coding agents.**
 
-*Know the code. Follow the evidence.*
+Understand source references, navigate dependencies, retrieve relevant code context, and trace the impact of Git changes—with source-backed evidence.
 
-Local-first code intelligence for AI coding agents.
-
-[Quick start](#quick-start) ·
-[Usage](#usage) ·
-[Agent integration](#ai-agent-integration) ·
-[How it works](#how-repogi-works) ·
-[Limitations](#current-status-and-limitations)
+[Get started](#quick-start) · [Explore features](#features) · [CLI examples](#usage) · [MCP integration](#ai-agent-integration) · [Architecture](#how-repogi-works) · [Limitations](#current-status-and-limitations)
 
 </div>
 
-> Give coding agents a map of the codebase, not just a pile of files.
+> **Give coding agents a map of the codebase, not just a pile of files.**
 
-Repogi indexes a TypeScript/TSX repository on your machine into a graph of
-declarations, imports, calls, references and JSX component uses. It then answers
-the questions agents usually settle by grepping and reading whole files:
-*where is this defined, who uses it, what depends on it, what does this change
-affect?* Every answer points back to a source location and says how it was
-derived. Anything Repogi could not confirm is reported as unconfirmed,
-incomplete or out of scope, never filled in by guesswork.
+**Repogi** is an open-source, Rust-based repository intelligence tool. It indexes **TypeScript and TSX** source code locally, connects declarations and references in a **static code graph**, and returns compact, evidence-backed answers about what code does, what depends on it, and what a proposed change might affect.
 
-It is a single Rust binary with an embedded SQLite index. It needs no network
-access, API key, daemon or language server, and it never executes code from the
-repository it indexes.
+Built for developers and AI coding assistants that need more than grep, Repogi offers a **command-line interface (CLI)** and a read-only **Model Context Protocol (MCP)** server. There is **no hosted service, API key, background daemon, or model dependency**. The repository being analyzed is never executed by the indexer.
+
+**At a glance:** TypeScript/TSX · Rust · SQLite + FTS5 · Tree-sitter · BLAKE3 · Git change impact · MCP · Offline-first
 
 ## Why Repogi?
 
-Coding agents explore unfamiliar repositories with text search and file reads.
-That works, but it has recurring costs:
+When an AI coding agent investigates an unfamiliar codebase, text search and whole-file reads are useful—but they don't reliably distinguish actual bindings from same-name matches or explain how changes propagate through imports, exports, and call sites.
 
-- **Repeated searching.** Finding every caller of a function means grepping a
-  name, then reading each hit to separate real uses from comments, strings,
-  same-named locals and shadowed imports.
-- **Excess context.** Whole files get read to find one declaration, and every
-  read competes for the agent's context window.
-- **Unverified assumptions.** Barrel re-exports, path aliases and renamed
-  imports hide dependencies that text search does not connect, so an agent
-  can conclude that nothing else is affected when something is.
+Repogi gives agents a **source-backed repository graph**, so they can:
 
-Repogi resolves these relationships once, at index time, using the syntax tree
-and the project's module-resolution settings. Agents can then ask for
-declarations, direct users and transitive consumers, and get back bounded
-answers with file and line evidence.
+- **Find the right code** — discover declarations, callers, references, and their file/line locations.
+- **Understand dependencies** — follow direct and transitive relationships across imports, aliases, and re-exports.
+- **Retrieve focused context** — fetch relevant snippets under explicit response-size budgets instead of always reading whole files.
+- **Review changes** — inspect which declarations and static consumers a Git change may affect.
+- **Know what is uncertain** — distinguish resolved evidence from ambiguity, unsupported patterns, stale indexes, and incomplete results.
+
+Repogi does **not** claim to prove runtime safety, perfectly resolve every TypeScript construct, or guarantee token savings. Evidence and limits come together.
 
 ## Features
 
-### Established
+| Capability | What Repogi provides |
+| --- | --- |
+| **Local repository indexing** | Parse `.ts` and `.tsx` files into a persistent, local SQLite graph and FTS5 search index. Respect `.gitignore` and supported exclusions. |
+| **Incremental indexing** | Use BLAKE3 file hashes to skip unchanged files and update existing graph records. |
+| **Symbol and reference navigation** | Inspect declarations, static calls, reference sites, JSX component use, and source ranges. |
+| **Dependency graph exploration** | Follow upstream consumers and downstream dependencies with bounded traversal and completeness reporting. |
+| **TypeScript module resolution** | Track relative imports, `tsconfig`/`jsconfig` aliases, re-exports, and barrel files where supported. |
+| **Context retrieval** | Produce ranked, deduplicated source evidence with compact and detailed output modes. |
+| **Git change impact analysis** | Compare Git states to report changed declarations and potential direct/transitive consumers. |
+| **Evidence and uncertainty** | Include source locations, resolution status, confidence or limitations, and explicit truncation where applicable. |
+| **CLI + MCP server** | Run locally using text/JSON CLI output or read-only stdio MCP tools for coding agents. |
 
-These are implemented, covered by the Rust test suite, and validated offline
-against labelled fixtures and a pinned open-source Next.js application.
-
-| Capability | What you get |
-|---|---|
-| **Local indexing** | `.ts`/`.tsx` files parsed with Tree-sitter into `.code-intel/index.db` (SQLite with FTS5). Honors `.gitignore`, skips symlinks, generated and oversized files. |
-| **Incremental updates** | Files are content-hashed (BLAKE3); unchanged files are not reparsed, and each update is applied atomically. |
-| **Declarations and references** | Functions, classes, methods, interfaces, type aliases, enums and variables, with their call and reference sites. Confirmed sites are kept apart from unconfirmed same-name sites. |
-| **Static binding graph** | Relative imports, `tsconfig`/`jsconfig` `paths` and `baseUrl` aliases, re-exports and barrels, direct calls, class inheritance, and JSX component references (`<Panel />`). |
-| **Dependency analysis** | Bounded upstream (consumers) and downstream (dependencies) traversal, with exact counts or explicit lower bounds when a work limit is reached. |
-| **Context retrieval** | Ranked, deduplicated source snippets for a task description, packed into a response-size budget, with overview, focused and detailed views. |
-| **Git change impact** | Compares two Git states and reports changed declarations, direct consumers, import-only files, transitive dependents, rebound sites and possible impact. |
-| **Evidence reporting** | Source ranges, the rule that produced each edge, resolution status (resolved, unresolved, ambiguous, unsupported), completeness flags and freshness checks. |
-| **CLI and MCP** | JSON and text output from the CLI; a read-only stdio MCP server for Claude Code, Codex and other MCP clients. |
-
-### Experimental
-
-These work and are tested, but their output is advisory or their interfaces may
-change.
-
-- **Affected-test discovery** (`impact --tests`): confirmed static test links,
-  possible candidates and coverage gaps. It never runs tests.
-- **Verification manifests** (`impact --manifest`, `manifest-verify`): a
-  canonical, self-verifying JSON artifact for CI handoff.
-- **Semantic retrieval** (`context --retrieval semantic`): context expansion
-  along verified dependency edges. The default `optimized` strategy is unchanged.
-
-### Not supported yet
-
-JavaScript/JSX, `.mts`/`.cts` and non-TypeScript languages; resolution into
-`node_modules` packages; instance-method dispatch; dynamic imports;
-compiler-backed type checking; embeddings; automatic re-indexing.
+**Experimental and advisory:** `impact --tests` discovers likely affected tests using static links; it does not execute tests. Verification manifests (`impact --manifest`, `manifest-verify`) and semantic retrieval (`context --retrieval semantic`) are also available, but should be treated as evolving interfaces rather than guarantees of coverage or correctness.
 
 ## Quick start
 
-Requirements: Rust 1.85 or later, and Git for change-impact commands.
+**Requirements:** Rust 1.85 or later. Git is required for change-impact commands.
 
-```sh
+Install from the source repository (Repogi is not currently published to crates.io):
+
+```bash
 git clone https://github.com/thinkgrid-labs/repogi.git
 cd repogi
-cargo install --path crates/cli --locked   # installs the `repogi` binary
+cargo install --path crates/cli --locked
 repogi --version
 ```
 
-To build without installing, run `cargo build --release --locked -p code-intel-cli`
-and use `target/release/repogi`.
+Alternatively, build without installing:
 
-Index a TypeScript project and ask a first question:
-
-```sh
-cd /path/to/your/project
-repogi index .
-repogi status
-repogi context "authenticate user" --format text
+```bash
+cargo build --release --locked -p code-intel-cli
+./target/release/repogi --help
 ```
 
-To try it without a project of your own, use the bundled fixture:
+Index a TypeScript/TSX project and ask for context:
 
-```sh
+```bash
+cd /path/to/your/typescript-project
+repogi index .
+repogi status
+repogi context "authentication flow" --format text
+```
+
+To explore the bundled TypeScript fixture from the **Repogi checkout**:
+
+```bash
+cd /path/to/repogi
 repogi index fixtures/typescript
 cd fixtures/typescript
 repogi context "authenticate user" --format text
 ```
 
+The index is stored in `.code-intel/index.db` for compatibility with earlier versions. Indexing is explicit: rerun `repogi index .` after edits to update the graph.
+
 ## Usage
 
-```text
-repogi index <path>       Index a repository offline (writes <path>/.code-intel/)
-repogi status             Inspect the nearest index
-repogi context <task>     Retrieve ranked source evidence for a task
-repogi graph              List typed static edges and unresolved sites
-repogi impact [path]      Analyse a Git change
-repogi manifest-verify    Validate a verification manifest
-repogi mcp                Serve the index to coding agents over MCP (stdio)
-```
+### CLI commands
 
-`status` and `context` use the closest `.code-intel/index.db` in the current
-directory or its ancestors. Indexing is explicit: run `repogi index` again after
-editing, and unchanged files are skipped.
+| Command | Purpose |
+| --- | --- |
+| `repogi index <path>` | Create or update a local index. |
+| `repogi status` | Inspect the nearest repository index and its state. |
+| `repogi context <task>` | Retrieve relevant code context and source evidence. |
+| `repogi graph` | Inspect static graph relationships and unresolved sites. |
+| `repogi impact [path]` | Analyze the potential impact of Git changes. |
+| `repogi manifest-verify` | Check a verification manifest. |
+| `repogi mcp` | Start a read-only MCP server over stdio. |
 
-### Context retrieval
+### Find code context and references
 
-```sh
-repogi context "session refresh" --max-tokens 2000            # JSON (default)
+```bash
+# Ranked, budgeted source evidence (JSON by default)
+repogi context "session refresh" --max-tokens 2000
+
+# A human-readable view
 repogi context "session refresh" --format text
-repogi context "session refresh" --detail overview --format text
-repogi context "session refresh" --select <id> --format text   # expand one ID from an overview
-```
 
-`--max-tokens` caps the whole rendered response using a conservative estimate
-of one token per UTF-8 byte. It is not a model tokenizer count.
-
-### Graph inspection
-
-```sh
+# Inspect graph edges in a specific source file
 repogi graph --path src/auth.ts --limit 100
 ```
 
-### Change impact
+`--max-tokens` is a **conservative estimate** based on UTF-8 bytes, not a count from a particular model tokenizer.
 
-```sh
-repogi impact --base HEAD                        # HEAD vs the working tree (staged, unstaged, untracked)
-repogi impact --base main --head feature         # two commits
-repogi impact --base main --summary              # affected files grouped, with completeness
-repogi impact --base main --detail --depth 3     # evidence chains and transitive paths
-repogi impact --base main --evidence-file src/components/Card.tsx
-repogi impact --base HEAD --tests                # advisory affected-test plan
+### Trace Git change impact
+
+```bash
+# HEAD compared with the working tree
+repogi impact --base HEAD
+
+# Compare branches/commits
+repogi impact --base main --head feature
+
+# See transitive evidence paths
+repogi impact --base main --detail --depth 3
+
+# Advisory test candidates (does not run tests)
+repogi impact --base HEAD --tests
+
+# Machine-readable report
 repogi impact --base HEAD~1 --head HEAD --format json
 ```
 
-`impact` reads Git objects directly, with hooks, filters and external diff
-disabled. It builds its own snapshot indexes under `.code-intel/impact/`, so
-your index, working tree and Git state are left unchanged.
+Impact analysis builds separate Git snapshot indexes under `.code-intel/impact/`; it does not change the repository's source files, Git index, or refs. A graph dependency is **not** proof that a change will break another component.
 
-Example output, from the bundled fixture after adding a parameter to
-`authenticate`:
+## How Repogi works
+
+Repogi uses **Tree-sitter parsing, static binding, and SQLite graph storage** to make repository relationships accessible to coding assistants. The flow below illustrates the architecture; the animation is decorative and the diagram remains readable without motion.
+
+<div align="center">
+  <img src="assets/repogi-flow.svg" alt="Repogi architecture flow: TypeScript/TSX source becomes a Tree-sitter and static-binding index, then a SQLite evidence graph, exposed via CLI and MCP for reference navigation, dependency analysis, and Git change impact." width="100%" />
+</div>
+
+<details>
+<summary>View a text-only architecture diagram</summary>
 
 ```text
-$ repogi impact --base HEAD
-atlas impact · HEAD (c78264d432) → working tree · 1 file(s), 1 declaration(s) changed · complete within the analysed static graph
-
-changed files:
-  M src/auth.ts (unstaged)
-
-changed declarations:
-  modified function authenticate  src/auth.ts:5 [signature]
-
-function authenticate (modified) — 1 direct, 0 import-only, 0 transitive, 0 possible · complete
-  src/auth.ts:12 CALLS from AuthService.check
-
-affected files: 1
-  src/auth.ts (changed, direct)
-
-warnings:
-  1 file(s) with syntax errors have no semantic edges
-
-scope: static TypeScript/TSX graph; a dependency is not a break; JavaScript, packages and runtime behaviour are not analysed
+TypeScript / TSX repository
+          |
+          v
+  Discover + parse files
+  Tree-sitter / BLAKE3
+          |
+          v
+   Static bindings
+   Imports / calls / references / JSX
+          |
+          v
+  SQLite + FTS5 code graph <------- Git snapshots
+          |
+          +----> Reference navigation
+          +----> Dependency traversal
+          +----> Context retrieval
+          +----> Git impact + advisory test candidates
+          |
+          v
+     CLI / MCP server
+          |
+          v
+      Coding agents
 ```
 
-The `atlas impact` header comes from the renderer shared with the
-`atlas_impact` MCP tool.
+</details>
 
-### Output contract
-
-`index`, `status` and `graph` print JSON. `context` prints JSON by default and text with
-`--format text`. `impact` prints text by default and JSON with `--format json`.
-Results go to stdout. Failures exit nonzero and print a JSON error
-(`schema_version`, `error.code`, `error.message`) on stderr.
+**Evidence matters.** A response can include a confirmed source binding, unresolved/ambiguous sites, an explicit incomplete-coverage flag, or an out-of-scope limitation. Repogi reports those differences rather than pretending every edge is certain.
 
 ## AI agent integration
 
-`repogi mcp` serves an existing index over the
-[Model Context Protocol](https://modelcontextprotocol.io) on stdio. The server
-is read-only and offline, confined to the roots you pass, and it never starts
-an agent or calls a model.
+Repogi exposes a **read-only Model Context Protocol (MCP)** server that AI coding assistants can use to navigate a project. The server is local, does not start an agent, and makes no model API calls.
 
-| Tool | Purpose |
-|---|---|
-| `atlas_context` | Discover declarations and source for a task |
-| `atlas_symbol` | Inspect a declaration by ID or name |
-| `atlas_references` | Direct call and reference sites, confirmed and unconfirmed |
-| `atlas_dependencies` | Bounded upstream/downstream traversal |
-| `atlas_status` | Index revision, graph counts and freshness |
-| `atlas_impact` | Git change impact and affected tests (opt-in only) |
+| MCP tool | Purpose |
+| --- | --- |
+| `atlas_context` | Retrieve task-relevant declarations and context. |
+| `atlas_symbol` | Inspect a declaration. |
+| `atlas_references` | Find direct static reference sites. |
+| `atlas_dependencies` | Traverse upstream/downstream relationships. |
+| `atlas_status` | Inspect index state and freshness. |
+| `atlas_impact` | Analyze change impact; opt-in only. |
 
-The tool names keep the `atlas_` prefix from before the rename. They are a
-stable contract with existing client configurations, permission rules and
-recorded evaluations.
-
-**Recommended navigation setup.** This configuration lists three tools. Agents
-keep their native Read and Grep for literals, known files and other languages.
-
-```text
---profile compact --tools atlas_context,atlas_references,atlas_dependencies
-```
-
-For source by ID, full-index freshness checks or Git review, list all six tools
-explicitly. `--profile full` on its own lists five tools and **does not** enable
-`atlas_impact`.
-
-```text
---profile full --tools atlas_context,atlas_symbol,atlas_references,atlas_dependencies,atlas_impact,atlas_status
-```
+The `atlas_*` tool identifiers are intentionally retained for backward compatibility with existing MCP clients and recorded evaluations. The server itself is branded Repogi.
 
 ### Claude Code
 
-From the repository you want to navigate:
+In the repository you want the agent to inspect:
 
-```sh
+```bash
 repogi index .
 claude mcp add --transport stdio --scope project repogi -- "$(command -v repogi)" mcp \
   --root "$PWD" --profile compact \
   --tools atlas_context,atlas_references,atlas_dependencies
 ```
 
-This writes the project's `.mcp.json`. A copy-ready file is in
-[`examples/agents/claude.navigation.mcp.json.example`](examples/agents/claude.navigation.mcp.json.example).
+See the [Claude Code MCP configuration example](examples/agents/claude.navigation.mcp.json.example).
 
 ### Codex
 
-Merge an entry like this into a trusted project's `.codex/config.toml`, using
-absolute paths:
+Add a configuration entry in the trusted project's `.codex/config.toml` using absolute paths:
 
 ```toml
 [mcp_servers.repogi]
-command = "/abs/path/to/checkout/target/release/repogi"
-args = ["mcp", "--root", "/abs/path/to/repo", "--profile", "compact", "--tools", "atlas_context,atlas_references,atlas_dependencies"]
+command = "/absolute/path/to/repogi"
+args = ["mcp", "--root", "/absolute/path/to/project", "--profile", "compact", "--tools", "atlas_context,atlas_references,atlas_dependencies"]
 ```
 
-See [`examples/agents/`](examples/agents/) for the navigation and full
-configurations for both clients.
-
-Tool lists are fixed when the client starts. Repogi does not add or remove tools
-during a session, and changing profiles does not change engine results.
-
-## How Repogi works
-
-```text
- TypeScript / TSX repository
-            |
-            |  discovery: .gitignore, built-in exclusions, no symlinks, BLAKE3 hashes
-            v
-   Tree-sitter parsing ------------> declarations, imports, exports, signatures
-            |
-            v
-   Static binder ------------------> typed edges: CALLS, REFERENCES, EXTENDS, imports
-   (relative + tsconfig paths,       each with a source site, rule and resolution status
-    barrels, aliases, JSX)
-            |
-            v
-   SQLite index (.code-intel/)       Git snapshots (.code-intel/impact/)
-            |                                   |
-            +--> context retrieval              |
-            +--> reference navigation           |
-            +--> dependency traversal           |
-            +--> change impact <----------------+
-            +--> affected-test discovery
-            |
-            v
-   CLI (JSON / text)  ·  MCP server (stdio)  -->  coding agents
-```
-
-Every response separates four kinds of statement:
-
-- **Evidence**: a resolved binding with its source range and the rule that
-  matched it, such as a call site bound through a barrel re-export.
-- **Uncertainty**: unconfirmed same-name sites, ambiguous or unresolved
-  imports, and files that mention a changed name but could not be analysed.
-- **Incomplete coverage**: truncation, work limits, lower-bound counts, syntax
-  errors and stale files, each reported with an explicit flag.
-- **Out of scope**: JavaScript, packages, runtime dispatch and dynamic imports,
-  named as unsupported.
-
-A dependency in the graph shows that one piece of code statically uses another.
-It does not prove that a change breaks it, and an empty result is only as
-complete as its flags say.
+See the [Codex MCP configuration example](examples/agents/codex.navigation.config.toml.example). Agents can continue using native file-read and grep tools alongside Repogi for unsupported languages or literal searches.
 
 ## Design principles
 
-- **Local-first.** Indexing, queries and the MCP server run on your machine with
-  no network access, account or hosted service.
-- **Evidence over guesses.** Cross-file relationships are recorded only when a
-  static rule confirms them. Everything else stays visibly unresolved.
-- **Incremental.** Content hashes decide what to reparse, and Git snapshots are
-  cached and reused.
-- **Deterministic.** The same index and query produce the same bytes, with stable
-  ordering and explicit budgets.
-- **Agent-neutral.** Plain CLI output and a standard MCP server, with no
-  dependency on a particular agent or model.
-- **Safe on untrusted code.** Repogi never runs repository scripts, compilers,
-  tests or package managers, and it refuses symlinked state and paths outside
-  the configured roots.
-- **Explicit limits.** Scope, truncation and freshness are part of every
-  response.
+- **Local-first:** repository indexing, graph queries, and MCP responses operate on your machine.
+- **Source-backed:** confirmed edges carry file/line evidence and the static rule that established them.
+- **Explicit uncertainty:** unsupported, ambiguous, or incomplete relationships are not silently treated as confirmed.
+- **Incremental and deterministic:** unchanged files are skipped and results have stable ordering within the supported contracts.
+- **Agent-neutral:** any compatible CLI/MCP consumer can use the graph; no specific model provider is required.
+- **Safe with untrusted code:** indexing does not execute scripts or arbitrary repository code, and path/symlink restrictions limit traversal.
 
 ## Current status and limitations
 
-Repogi is a **developer preview** (version 0.1.0). It is not yet published to
-crates.io, and no prebuilt binaries are available. Build it from source.
+Repogi is a **developer preview (v0.1.0)**. It is currently built from source, with no prebuilt binaries or crates.io release listed by the project.
 
-- **Languages:** `.ts` and `.tsx` only. JavaScript/JSX and `.mts`/`.cts` files
-  are not indexed.
-- **Resolution:** relative and `tsconfig`/`jsconfig` path aliases are
-  supported. Package lookup, instance dispatch, nested declaration targets and
-  dynamic imports are not resolved, and those sites are reported as such.
-- **Parser:** the bundled Tree-sitter TypeScript grammar (0.23.2) fails on a few
-  constructs, such as `f<typeof import('x')>()`. Affected files are reported as
-  having syntax errors, and their intact declarations are kept.
-- **Freshness:** the index reflects the last `repogi index` run. Responses
-  check the returned files and flag stale ones, but nothing re-indexes
-  automatically.
-- **Impact and tests:** results are static and advisory. They do not establish
-  runtime safety, compilation failure or test coverage.
-- **Agent outcomes:** Repogi has been evaluated with coding agents only in small
-  pilot studies. Those do not establish general token, cost or accuracy
-  improvements, and none are claimed here.
-- **Platforms:** developed and tested on Linux x86_64. Other platforms are
-  untested.
+| Area | Current scope |
+| --- | --- |
+| **Languages** | TypeScript `.ts` and TSX `.tsx`. JavaScript, JSX, `.mts`, `.cts`, and other languages are not yet supported. |
+| **Resolution** | Relative and selected `tsconfig`/`jsconfig` alias and barrel patterns. Package resolution, instance dispatch, and dynamic imports are not fully resolved. |
+| **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps in some constructs. |
+| **Freshness** | Index updates are manual; files may be flagged stale until reindexed. |
+| **Impact / tests** | Static and advisory. Results do not prove runtime failures or test coverage; affected-test discovery does not run tests. |
+| **Platforms** | Developed and tested primarily on Linux x86_64; other platforms are not verified here. |
+| **Agent outcomes** | Limited pilot evidence only; no general token, accuracy, or cost-saving guarantee is claimed. |
+
+## FAQ
+
+<details>
+<summary><strong>What is Repogi?</strong></summary>
+
+Repogi (Repo Graph Intelligence) is a local-first, open-source **code intelligence CLI and MCP server**. It builds a source-backed static dependency graph so developers and AI coding agents can discover relationships in TypeScript/TSX repositories.
+
+</details>
+
+<details>
+<summary><strong>How is Repogi different from grep or ordinary code search?</strong></summary>
+
+Grep finds text matches. Repogi uses source parsing and supported static binding rules to distinguish resolved code references from unconfirmed same-name matches, while returning source locations and explicit coverage limits. Literal search remains useful alongside it.
+
+</details>
+
+<details>
+<summary><strong>Does Repogi use an LLM or send my source code to a cloud service?</strong></summary>
+
+No. Indexing and querying are local and do not require an AI provider, API key, or hosted database. Agents connecting over MCP may have their own data-handling policies, which Repogi does not control.
+
+</details>
+
+<details>
+<summary><strong>Can Repogi automatically find every affected test?</strong></summary>
+
+No. It can suggest **static affected-test candidates** and report coverage gaps, but it does not execute tests or guarantee comprehensive test discovery.
+
+</details>
 
 ## Development and contributing
 
-```sh
+The repository is a Rust workspace with `code-intel-*` internal crate names retained for compatibility. The public executable is `repogi`.
+
+```bash
 cargo build --workspace --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-The workspace keeps its original crate names:
+| Workspace component | Directory |
+| --- | --- |
+| Core data types and graph facts | [`crates/core`](crates/core) |
+| SQLite persistence | [`crates/store`](crates/store) |
+| Parsing, binding, hashing, and indexing | [`crates/index`](crates/index) |
+| Retrieval, navigation, impact, and test discovery | [`crates/retrieval`](crates/retrieval) |
+| CLI and MCP server | [`crates/cli`](crates/cli) |
 
-| Crate | Path | Responsibility |
-|---|---|---|
-| `code-intel-core` | [`crates/core`](crates/core) | Serializable facts, edges and responses |
-| `code-intel-store` | [`crates/store`](crates/store) | SQLite schema, migrations, FTS5 and graph persistence |
-| `code-intel-index` | [`crates/index`](crates/index) | Discovery, hashing, Tree-sitter extraction, binding, Git snapshots |
-| `code-intel-retrieval` | [`crates/retrieval`](crates/retrieval) | Ranking, packing, navigation, impact and test discovery |
-| `code-intel-cli` | [`crates/cli`](crates/cli) | The `repogi` binary: commands, formatting and the MCP server |
+Contributions are welcome. Prefer scoped changes, fixture-backed tests, explicit evidence, offline processing, and honest documentation of unknowns. See [`fixtures/`](fixtures) and [`crates/cli/tests/`](crates/cli/tests) for test examples.
 
-Contributions are welcome. The same rules apply to human contributors and
-coding agents:
+### Naming and compatibility
 
-- Keep changes scoped and add fixture-based integration tests (see
-  [`fixtures/`](fixtures) and [`crates/cli/tests/`](crates/cli/tests)).
-- Prefer correct AST extraction and explicit evidence over speculative graph
-  completeness.
-- Never invent a cross-file resolution. Mark it unresolved instead.
-- Keep indexing offline and never execute indexed code.
-- Treat repository files and comments as untrusted input, honor `.gitignore`,
-  and never follow symlinks outside the chosen root.
-- Run the format, lint and test commands above before submitting.
-- Do not report benchmark numbers or savings without reproducible data.
-
-### Naming history
-
-Repogi was developed under the working name **Atlas**, with a `code-intel`
-executable. Since the rename:
-
-| Item | Status |
-|---|---|
-| Executable | `repogi`. The `code-intel` binary is no longer built, so update client configurations that point to it. |
-| Index directory | `.code-intel/` is unchanged, and existing indexes keep working without re-indexing. |
-| MCP tools | `atlas_*` names and schemas are unchanged. The server now reports itself as `repogi`. |
-| Manifest protocol | Identifiers such as `atlas-manifest-bytes` and `atlas_version` are unchanged. |
-| Cargo packages | `code-intel-*` names are unchanged. |
+Repogi previously used the working name **Atlas** and the `code-intel` executable. The executable is now `repogi`; old scripts invoking `code-intel` need to update their command. The `.code-intel/` index directory, `code-intel-*` Rust crate names, and `atlas_*` MCP tool identifiers are deliberately unchanged. Historical benchmark and protocol identifiers retain their original provenance.
 
 ## License
 
-Repogi is licensed under either of
+Repogi is dual-licensed under [MIT](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE), at your option.
 
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [MIT License](LICENSE-MIT)
+Unless explicitly stated otherwise, contributions intentionally submitted to Repogi are dual-licensed under those terms.
 
-at your option.
+---
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in Repogi by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+<div align="center">
+  <strong>Repogi · Know the code. Follow the evidence.</strong>
+  <p>Open-source repository intelligence for developers and AI coding agents.</p>
+  <a href="https://github.com/thinkgrid-labs/repogi/issues">Report an issue</a> · <a href="https://github.com/thinkgrid-labs/repogi">View the repository</a>
+</div>
