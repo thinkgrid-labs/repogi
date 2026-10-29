@@ -94,7 +94,7 @@ Unpack the archive and put `repogi` (`repogi.exe`) on your `PATH`. The archive a
 
 ## Build from source
 
-Install Rust 1.85 or later, Git and a native C compiler/linker. Cargo retrieves the locked dependencies on first build; a populated Cargo cache supports offline builds. The build requires no Node, Python or model service.
+Install Rust 1.98 or newer (the version CI tests), Git and a native C compiler/linker. Cargo retrieves the locked dependencies on first build; a populated Cargo cache supports offline builds. The build requires no Node, Python or model service.
 
 ```sh
 git clone https://github.com/thinkgrid-labs/repogi.git
