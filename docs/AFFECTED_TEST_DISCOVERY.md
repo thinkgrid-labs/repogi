@@ -1,13 +1,13 @@
 # Affected-test discovery and verification planning
 
-Phase 4.5 adds an explicit, read-only CLI view over Git impact analysis:
+Use `impact --tests` for a read-only view of probable affected tests:
 
 ```sh
-code-intel impact --base HEAD --tests
-code-intel impact --base main --head feature --tests --format json
-code-intel impact --base HEAD~1 --head HEAD --tests --detail
-code-intel impact --base HEAD --tests --test-dir integration-tests
-code-intel impact --base HEAD --tests --evidence-file src/lib/format.test.ts --detail
+repogi impact --base HEAD --tests
+repogi impact --base main --head feature --tests --format json
+repogi impact --base HEAD~1 --head HEAD --tests --detail
+repogi impact --base HEAD --tests --test-dir integration-tests
+repogi impact --base HEAD --tests --evidence-file src/lib/format.test.ts --detail
 ```
 
 The output recommends existing probable test files, gives static evidence and
@@ -16,7 +16,7 @@ runs these tests, project scripts, configuration code or dependency installers.
 It emits no test-runner commands. Passing a recommended selection does not prove
 safety, and unlisted tests may still be necessary.
 
-Phase 4.9 adds a separate CLI artifact, `impact --manifest --format json`, that
+The separate CLI artifact, `impact --manifest --format json`,
 composes this same discovery with Git/declaration/affected-code evidence from one
 comparison. It preserves individual candidates, uncertainty and original proof
 semantics; see [VERIFICATION_MANIFEST.md](VERIFICATION_MANIFEST.md).
@@ -48,8 +48,8 @@ cross-revision identities. One deterministic shortest available proof is retaine
 per candidate; `linked_changes` lists confirmed declaration origins, including
 targets of changed usage bindings. It does not assert that each target's text
 changed: textual declaration changes are listed separately in `changed`.
-Detailed output includes the selected proof's binding chain; since Phase 4.6 the
-default text and JSON views omit it.
+Detailed output includes the selected proof's binding chain; the default text
+and JSON views omit it.
 The `via` prefix retains the existing impact engine's declaration-name evidence;
 the root and terminal target have explicit repository-relative declaration keys.
 Paired `both` sites follow the existing impact model's head-location convention.
@@ -176,12 +176,12 @@ completeness. Output fitting preserves confirmed candidate order and drops whole
 rows with counts. If fixed metadata alone cannot fit, Repogi returns an explicit
 budget error instead of broken JSON or silently clipped paths.
 
-Phase 4.6 rendering changes, shared by the CLI and MCP (classification unchanged):
+CLI and MCP rendering follow these rules:
 
 - Possible candidates are ordered by signal strength, then path: rows with static
   evidence (import-only, re-export, binding change), other non-heuristic signals,
   basename matches, then colocation-only rows.
-- Since Phase 4.8, default text lists the stronger signals individually and
+- Default text lists the stronger signals individually and
   summarizes weak heuristics: basename-only candidates (possibly also colocated)
   in one counted line, and colocation-only candidates by directory. Summaries
   never establish a target or a confirmed relationship. Each group counts the

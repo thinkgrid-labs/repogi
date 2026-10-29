@@ -524,7 +524,9 @@
       "version": "6.0.0",
       "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "repository": "https://github.com/r-efi/r-efi",
-      "license_files": []
+      "license_files": [
+        "licenses/dependencies/r-efi-6.0.0/AUTHORS"
+      ]
     },
     {
       "name": "regex",

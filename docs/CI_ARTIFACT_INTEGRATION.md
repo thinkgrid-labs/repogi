@@ -12,16 +12,16 @@ Bash on an isolated CI runner:
 
 ```sh
 set -euo pipefail
-ATLAS_BIN=/opt/atlas/selected-build/code-intel
+REPOGI_BIN=/opt/repogi/bin/repogi
 REPO=/workspace/checkout
 BASE_REV=0123456789012345678901234567890123456789 # replace with an existing commit
 HEAD_REV=abcdef0123456789012345678901234567890123 # replace with an existing commit
 ARTIFACT_DIR=$(mktemp -d /tmp/atlas-artifact.XXXXXX)
 
-"$ATLAS_BIN" impact "$REPO" --base "$BASE_REV" --head "$HEAD_REV" \
+"$REPOGI_BIN" impact "$REPO" --base "$BASE_REV" --head "$HEAD_REV" \
   --manifest --format json --max-bytes 8000000 \
   > "$ARTIFACT_DIR/manifest.pending"
-"$ATLAS_BIN" manifest-verify "$ARTIFACT_DIR/manifest.pending" \
+"$REPOGI_BIN" manifest-verify "$ARTIFACT_DIR/manifest.pending" \
   > "$ARTIFACT_DIR/atlas-verification-integrity.json"
 mv "$ARTIFACT_DIR/manifest.pending" \
   "$ARTIFACT_DIR/atlas-verification-manifest.json"
@@ -48,7 +48,7 @@ from manifest_id, which hashes canonical JSON without manifest_id or a newline.
 Optional expected values bind validation to a previously received descriptor:
 
 ```sh
-"$ATLAS_BIN" manifest-verify "$ARTIFACT_DIR/atlas-verification-manifest.json" \
+"$REPOGI_BIN" manifest-verify "$ARTIFACT_DIR/atlas-verification-manifest.json" \
   --expected-manifest-id 'blake3:<payload digest>' \
   --expected-envelope-digest 'blake3:<exact envelope digest>'
 ```
@@ -57,8 +57,8 @@ Validation success establishes integrity and supported encoding, not analysis
 correctness, test execution or change safety. Digests are not signatures. Persist
 the complete JSON and its integrity record together; protect that record when
 authenticity matters. A separate raw-byte BLAKE3 implementation can recompute
-both values using the documented contract. The benchmark's
-[independent oracle example](../crates/cli/examples/artifact_digest.rs) hashes
+both values using the documented contract. The
+[independent digest example](../crates/cli/examples/artifact_digest.rs) hashes
 stdin without importing the manifest generator or verifier.
 
 ## Explicit CI choices and failures
@@ -71,7 +71,7 @@ analysis_limited=true. An integrity check does not erase that uncertainty.
 
 Reproduction requires the same selected executable, options, requested refs and
 recorded Git/index context, including the checked-out HEAD. Identity is not
-promised solely from two compared commit IDs; this preserves Phase 4.9 semantics.
+promised solely from two compared commit IDs.
 
 For a pull request, compare its recorded base SHA and head SHA. Decide externally
 whether the desired comparison is the tip base SHA or a merge base; Repogi does
@@ -89,12 +89,14 @@ still describe incomplete analysis. No execution plan or merge gate is implied.
 ## Optional GitHub Actions template
 
 [verification-manifest.yml.example](../examples/ci/verification-manifest.yml.example)
-is intentionally outside .github/workflows and is not activated by this phase.
+is an optional consumer example, separate from the repository’s
+[build and test CI](../.github/workflows/ci.yml). Copy and configure it in a
+consumer repository only when you want verification-artifact export.
 Before using it, replace both action placeholders with reviewed full commit
 SHAs and configure repository variables ATLAS_LINUX_AMD64_URL and
 ATLAS_LINUX_AMD64_SHA256 for a trusted, explicitly selected standalone binary.
 The binary is downloaded outside the checkout and checked against that SHA-256
-before execution. This template is not a release-download service or an Repogi
+before execution. This template is not a release-download service or a Repogi
 workflow runtime.
 
 It uses pull_request or manual dispatch on a GitHub-hosted disposable runner,

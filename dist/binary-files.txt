@@ -1,11 +1,10 @@
 .gitattributes
+.github/workflows/ci.yml
 .gitignore
 Cargo.lock
 Cargo.toml
 LICENSE
-LICENSE-MIT
 README.md
-THIRD_PARTY_NOTICES.json
 THIRD_PARTY_NOTICES.md
 assets/repogi-banner.svg
 assets/repogi-flow.svg
@@ -93,6 +92,7 @@ docs/MCP_IMPACT.md
 docs/MCP_TEST_DISCOVERY.md
 docs/MCP_VERIFICATION_MANIFEST.md
 docs/MODULE_RESOLUTION.md
+docs/README.md
 docs/REFERENCE_FIRST_AGENT_WORKFLOWS.md
 docs/REFERENCE_NAVIGATION_LIMITS.md
 docs/SEMANTICS.md
@@ -269,6 +269,7 @@ fixtures/typescript/src/barrel.ts
 fixtures/typescript/src/broken.ts
 fixtures/typescript/src/types.ts
 fixtures/typescript/src/ui.tsx
+licenses/THIRD_PARTY_NOTICES.json
 licenses/dependencies/aho-corasick-1.1.5/COPYING
 licenses/dependencies/aho-corasick-1.1.5/LICENSE-MIT
 licenses/dependencies/aho-corasick-1.1.5/UNLICENSE
@@ -379,6 +380,7 @@ licenses/dependencies/proc-macro2-1.0.107/LICENSE-APACHE
 licenses/dependencies/proc-macro2-1.0.107/LICENSE-MIT
 licenses/dependencies/quote-1.0.47/LICENSE-APACHE
 licenses/dependencies/quote-1.0.47/LICENSE-MIT
+licenses/dependencies/r-efi-6.0.0/AUTHORS
 licenses/dependencies/regex-1.13.1/LICENSE-APACHE
 licenses/dependencies/regex-1.13.1/LICENSE-MIT
 licenses/dependencies/regex-automata-0.4.18/LICENSE-APACHE

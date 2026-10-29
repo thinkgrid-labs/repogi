@@ -28,7 +28,7 @@ __pycache__/
 /docs/ROUTING_BENCHMARK_COMPATIBILITY.md
 /docs/DEVELOPER_PREVIEW_RELEASE_CHECKLIST.md
 
-# Superseded project-license asset, retained locally pending index cleanup.
+# Superseded project-license asset; preserved in local internal records.
 # Dependency Apache licenses under licenses/ and fixtures/ remain distributable.
 /LICENSE-APACHE
 /examples/ci/deployment_preflight.py

@@ -3,14 +3,14 @@
 ## CLI and output policy
 
 ```sh
-code-intel impact . --base HEAD --manifest --format json
-code-intel impact . --base main --head feature --manifest --format json
+repogi impact . --base HEAD --manifest --format json
+repogi impact . --base main --head feature --manifest --format json
 ```
 
 Manifest mode requires explicit JSON. It conflicts with `--tests`, `--summary`,
 `--detail` and `--evidence-file`. Literal `--test-dir` values are supported with
 either `--tests` or `--manifest`. Ordinary impact/test/summary defaults stay
-unchanged. No MCP tool or schema is changed.
+unchanged. The CLI artifact and MCP transport share the same manifest schema.
 
 The manifest default and maximum output budget are 8,000,000 UTF-8 bytes. A
 smaller explicit `--max-bytes` is an integrity boundary: if the entire artifact
@@ -21,11 +21,9 @@ finding is dropped to make an artifact fit. Analysis limits still apply:
 Their effect is recorded separately from output omissions. Discovered evidence
 is retained even when those limits make discovery non-exhaustive.
 
-Architecture refinement: indexed-source digests alone omit JavaScript/JSON
-contents. The shared file comparison will therefore retain BLAKE3 digests of
-its actual sorted path-to-Git-blob-OID maps, without changing the legacy JSON
-schema. Manifest mode will rehash the relevant working files once at the end
-to verify that identity. This is a read-only integrity pass, not another diff
+Indexed-source digests alone omit JavaScript/JSON contents. The shared file
+comparison also retains BLAKE3 digests of its sorted path-to-Git-blob-OID maps.
+Manifest mode rehashes the relevant working files at the end to verify identity. This is a read-only integrity pass, not another diff
 or graph analysis. Modes, ignored files and unsupported filesystem states remain
 subject to the existing static profile; these digests are not whole-disk images.
 

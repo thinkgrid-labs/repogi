@@ -3,7 +3,7 @@
 Repogi is a developer preview. Source repository: https://github.com/thinkgrid-labs/repogi.
 License: [MIT](../LICENSE). See [third-party notices](../THIRD_PARTY_NOTICES.md) for dependency licenses.
 
-Install Rust 1.85 or later, Git and a native C compiler/linker. Cargo retrieves the locked dependencies on first build; a populated Cargo cache supports offline builds. No Node, Python, model service or evaluation files are required by the Rust build.
+Install Rust 1.85 or later, Git and a native C compiler/linker. Cargo retrieves the locked dependencies on first build; a populated Cargo cache supports offline builds. The Rust build requires no Node, Python or model service.
 
 ```sh
 git clone https://github.com/thinkgrid-labs/repogi.git

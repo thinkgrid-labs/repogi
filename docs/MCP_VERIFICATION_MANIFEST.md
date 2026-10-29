@@ -1,13 +1,13 @@
 # Verification manifests over MCP
 
-Transport contract recorded before implementation for Phase 4.10. Manifest schema
-1 and its [canonical identity](VERIFICATION_MANIFEST.md) remain unchanged.
+The MCP transport serves complete schema-1 verification manifests in bounded
+chunks. See the [manifest identity contract](VERIFICATION_MANIFEST.md).
 
 ## Request and failure contract
 
-Enable the existing opt-in tool with `--tools atlas_impact`. No new tool or
-default-profile instruction is added. Ordinary interactive review continues to
-use `summary:true`, `tests:true` and `evidence_file`.
+Enable the opt-in tool with `--tools atlas_impact`. Use `summary:true`,
+`tests:true` and `evidence_file` for interactive review rather than a complete
+manifest export.
 
 Prepare a complete artifact:
 

@@ -10,7 +10,8 @@ The existing [transport](MCP_VERIFICATION_MANIFEST.md) and
 
 Use a separate Python environment with the dependencies in
 [requirements.txt](../examples/manifest_consumer/requirements.txt). Fetch mode
-uses the tested official SDK 2.3.0 and its legacy initialization lifecycle.
+uses the official SDK version pinned in requirements.txt and its legacy
+initialization lifecycle.
 Saved-file verification needs only Python and a BLAKE3 provider. It does not need
 Repogi, Git, a repository, snapshot cache or MCP server.
 
@@ -18,13 +19,12 @@ The default hash provider is the separately installed Python `blake3` package.
 Alternatively, `--digest-command` selects a trusted executable that reads raw
 stdin and emits exactly `blake3:` followed by 64 lowercase hexadecimal digits.
 It executes directly, without a shell. `ATLAS_BLAKE3_COMMAND` supplies the same
-choice to the CI helper and benchmark processes. Never select a program from an
+choice to the CI helper. Never select a program from an
 untrusted repository.
 
-Phase 4.11 used the independent upstream **C** implementation of BLAKE3 1.8.7,
-compiled from locally cached upstream sources, rather than Repogi's Rust hashing
-implementation. The small [stdin adapter](../examples/manifest_consumer/blake3_stdin.c)
-contains no manifest logic. Given an independently obtained upstream C directory:
+For an independent BLAKE3 provider, compile the upstream C implementation with
+the [stdin adapter](../examples/manifest_consumer/blake3_stdin.c), which contains
+no manifest logic. Set `BLAKE3_C_DIR` to your trusted upstream C source directory:
 
 ```sh
 cc -O2 -DBLAKE3_NO_SSE2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_AVX2 \
@@ -35,7 +35,7 @@ cc -O2 -DBLAKE3_NO_SSE2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_AVX2 \
 
 python examples/manifest_consumer/consumer.py \
   --digest-command /tmp/atlas-blake3-stdin fetch \
-  --binary /trusted/code-intel --root /checkout --base BASE_SHA --head HEAD_SHA \
+  --binary /trusted/repogi --root /checkout --base BASE_SHA --head HEAD_SHA \
   --budget 8000 --output /artifacts/manifest.json
 
 python examples/manifest_consumer/consumer.py \
@@ -132,7 +132,7 @@ availability. Repogi never fetches objects or runs checked-out scripts.
 ```sh
 export ATLAS_BLAKE3_COMMAND=/trusted/blake3-stdin
 python examples/manifest_consumer/ci_artifact.py \
-  --binary /trusted/code-intel --sha256 TRUSTED_EXECUTABLE_SHA256 \
+  --binary /trusted/repogi --sha256 TRUSTED_EXECUTABLE_SHA256 \
   --root /checkout --base BASE_SHA --head HEAD_SHA \
   --output /artifacts/new-unique-bundle
 ```
@@ -146,22 +146,18 @@ both identities, total bytes, executable checksum and resolved commits. Use a
 unique caller-owned output destination on one filesystem.
 
 Budget, missing-object, executable-checksum, CLI-verifier and independent-verifier
-failures remove pending output and never publish the bundle. The smoke test also
-consumes the saved artifact after deleting the original repositories and caches.
+failures remove pending output and never publish the bundle. Saved artifacts
+can be verified independently of the original repository or cache.
 Reproduction requires the same executable, options, requested resolved refs and
 Git/index context, not solely the pair of compared tree contents.
 
-The existing optional [Actions example](../examples/ci/verification-manifest.yml.example)
-remains inactive and contains deliberate action-pin placeholders. The offline
-review checks read-only contents permission, disabled stored credentials, exact
-PR head/base inputs, object availability checks, HTTPS/checksum shell logic,
-verification before upload, seven-day retention and no project commands. Its
-shell is exercised using a local copy in place of network download. No checkout
-action, upload action, fork PR or hosted workflow was run. Before activation,
-select and review actual full action SHAs and configure trusted binary provenance.
-Full-history checkout alone is not proof that every fork topology supplies both
-objects: the explicit object checks fail closed. Validate that hosting topology
-separately. Keep repository metadata visibility and artifact retention explicit.
+The optional [Actions example](../examples/ci/verification-manifest.yml.example)
+contains action-pin placeholders. Before copying it into a consumer repository,
+select trusted action revisions and configure the binary URL and checksum.
+The template checks object availability, verifies the artifact before upload and
+uses seven-day retention. Choose visibility and retention appropriate to the
+repository metadata in the artifact. Full-history checkout alone does not prove
+that both compared commits are available; missing objects fail explicitly.
 
 ## Schema compatibility policy
 

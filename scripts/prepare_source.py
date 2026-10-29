@@ -12,9 +12,10 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {
     '.gitignore', '.gitattributes', 'Cargo.toml', 'Cargo.lock', 'LICENSE',
-    'LICENSE-MIT', 'README.md', 'THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.json',
+    'README.md', 'THIRD_PARTY_NOTICES.md', 'licenses/THIRD_PARTY_NOTICES.json',
 }
 PUBLIC_ROOTS = {'assets', 'crates', 'docs', 'examples', 'fixtures', 'licenses', 'dist', 'scripts'}
+PUBLIC_CONFIG_FILES = {'.github/workflows/ci.yml'}
 EXCLUDED = {
     'LICENSE-APACHE', 'AGENTS.md', 'docs/PRD.md',
     'docs/DEVELOPER_PREVIEW_RELEASE_CHECKLIST.md',
@@ -44,7 +45,7 @@ def members() -> list[Path]:
                 or rel.name.startswith(('PHASE3', 'PHASE4', 'PHASE5'))
                 or 'BENCHMARK' in rel.name or 'EVALUATION' in rel.name):
             raise ValueError(f'internal path in manifest: {name}')
-        if name not in ROOT_FILES and rel.parts[0] not in PUBLIC_ROOTS:
+        if name not in ROOT_FILES | PUBLIC_CONFIG_FILES and rel.parts[0] not in PUBLIC_ROOTS:
             raise ValueError(f'unreviewed source root: {name}')
         src = ROOT / name
         if any(parent.is_symlink() for parent in [src, *src.parents]):

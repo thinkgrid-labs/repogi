@@ -89,7 +89,7 @@ repogi context "authenticate user" --format text
 
 The index is stored in `.code-intel/index.db` for compatibility with earlier versions. Indexing is explicit: rerun `repogi index .` after edits to update the graph.
 
-See the [installation guide](docs/DEVELOPER_PREVIEW_INSTALLATION.md), [MCP configuration](docs/MCP.md), [reference-first workflows](docs/REFERENCE_FIRST_AGENT_WORKFLOWS.md) and [navigation limits](docs/REFERENCE_NAVIGATION_LIMITS.md).
+Browse the [public documentation](docs/README.md). See the [installation guide](docs/DEVELOPER_PREVIEW_INSTALLATION.md), [MCP configuration](docs/MCP.md), [reference-first workflows](docs/REFERENCE_FIRST_AGENT_WORKFLOWS.md) and [navigation limits](docs/REFERENCE_NAVIGATION_LIMITS.md).
 
 ## Usage
 

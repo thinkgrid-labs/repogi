@@ -1,4 +1,4 @@
-# Project-aware module resolution (Phase 3.5)
+# Project-aware module resolution
 
 Repogi resolves TypeScript/TSX module specifiers natively in Rust, using the repository's own `tsconfig.json`/`jsconfig.json`:
 - `baseUrl`;
@@ -14,8 +14,6 @@ There is no Node.js, TypeScript compiler, language server or package lookup at r
 The rules come from the TypeScript handbook:
 - [module resolution reference](https://www.typescriptlang.org/docs/handbook/modules/reference);
 - [`paths`](https://www.typescriptlang.org/tsconfig/#paths), [`baseUrl`](https://www.typescriptlang.org/tsconfig/#baseUrl) and [`extends`](https://www.typescriptlang.org/tsconfig/#extends).
-
-The precedence rules below were also checked against TypeScript 6.0.3's `--traceResolution` on a synthetic repository. tsc and Repogi agreed on every case except the deliberate `x.ts`/`x/index.ts` difference noted in the table.
 
 | Rule | TypeScript | Repogi |
 |---|---|---|
@@ -61,7 +59,7 @@ There is no basename fallback. An unresolved alias never becomes a confirmed sym
 - `config/base.json: baseUrl . => src/lib/util.ts`;
 - `src/app/page.ts: module @/lib/util => src/lib/util.ts`.
 
-Skipped substitutions appear as `-> ./missing/* (no module)`. Relative imports keep their pre-3.5 evidence, so outputs for repositories without configs are byte-identical (checked by `mcp_bench`).
+Skipped substitutions appear as `-> ./missing/* (no module)`. Evidence for relative imports identifies the selected source module.
 
 ## Configuration-aware indexing
 
@@ -71,6 +69,6 @@ Skipped substitutions appear as `-> ./missing/* (no module)`. Relative imports k
 4. When the fingerprint differs from the indexed one, Repogi **rebinds every cached module from its stored syntax IR without reparsing any source**. That happens when a config is edited, added, deleted or becomes invalid, or when a JavaScript or `package.json` file appears. The rebind happens in the same transaction as the revision bump, and the report sets `resolution_changed: true`.
 5. Warm runs with an unchanged fingerprint rebuild nothing. A failed update rolls back.
 6. MCP `atlas_status` recomputes the fingerprint, so a config-only edit shows as `fresh: false` with `freshness.resolution_changed: true`.
-7. Existing indexes rebind once on the first run after upgrading.
+7. Re-index explicitly after changing source or resolution settings.
 
 The invalidation is coarse (a whole rebind), consistent with source changes.

@@ -34,3 +34,6 @@ __pycache__ export-ignore
 /docs/agents/atlas-retrieval-strategy.md export-ignore
 /docs/agents/atlas-usage.md export-ignore
 /docs/agents/atlas-workflows.md export-ignore
+
+# Third-party notices are documentation, not application source.
+licenses/** linguist-documentation

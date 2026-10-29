@@ -5,7 +5,7 @@
   "license": "MIT",
   "license_file": "LICENSE",
   "copyright": "Copyright (c) 2026 ThinkGrid Labs",
-  "third_party_notices": "THIRD_PARTY_NOTICES.json",
+  "third_party_notices": "licenses/THIRD_PARTY_NOTICES.json",
   "source_manifest": "dist/source-files.txt",
   "proposed_binary_manifest": "dist/binary-files.txt"
 }

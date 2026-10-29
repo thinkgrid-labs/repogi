@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: "1.98.0"
+          components: rustfmt, clippy
+
+      - name: Validate public source manifest
+        run: python3 scripts/prepare_source.py
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Build CLI
+        run: cargo build --release --locked -p code-intel-cli

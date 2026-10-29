@@ -1,4 +1,4 @@
-# Compact change-impact summaries (Phase 4.4)
+# Compact change-impact summaries
 
 `--summary` on the CLI, or `summary: true` on the opt-in `atlas_impact` MCP tool,
 returns one row per repository-relative file. It projects the existing impact
@@ -7,10 +7,10 @@ traversal. Start here for file discovery; request evidence for selected files
 before deciding what to edit or test.
 
 ```sh
-code-intel impact . --base main --summary --max-bytes 8000
-code-intel impact . --base main --summary --format json --max-bytes 8000
-code-intel impact . --base main --evidence-file src/components/Card.tsx
-code-intel impact . --base main --detail --format json --max-bytes 1000000
+repogi impact . --base main --summary --max-bytes 8000
+repogi impact . --base main --summary --format json --max-bytes 8000
+repogi impact . --base main --evidence-file src/components/Card.tsx
+repogi impact . --base main --detail --format json --max-bytes 1000000
 ```
 
 Equivalent MCP calls use the existing tool:
@@ -81,9 +81,8 @@ These fields deliberately describe different axes:
 | `complete` | All preceding analysis/coverage/freshness checks pass, no unverified effects remain, and no file rows were omitted. |
 
 Duplicate removal alone never proves completeness. All rows may fit while
-coverage remains unknown: Umami contains syntax-error and skipped sources, so
-its summaries conservatively remain incomplete even with perfect labelled file
-recall. The unsupported profile is printed in every summary: JavaScript and
+coverage remains unknown when a repository contains syntax-error or skipped
+sources. The unsupported profile is printed in every summary: JavaScript and
 other unsupported extensions, packages/excluded directories, and dynamic runtime
 behavior. Enumeration of confirmed dependencies does not establish runtime
 safety, exhaustive effects, or TypeScript compilation breakage. Compilation
@@ -120,9 +119,3 @@ Source lines/byte spans, enclosing declaration IDs, binding chains, transitive
 paths, export/signature/body details and diagnostic messages remain accessible
 through detailed evidence. They are valuable for verification but repeating them
 for every site is unnecessary for initial file discovery.
-
-The recorded-response audit partitions bytes into paths, residual per-site fields,
-binding chains, source locations, transitive paths, metadata and formatting/JSON
-keys. Paths embedded in chains belong to their chain category. Reference tokens
-for fragments are counted separately and do not add to whole-response BPE counts.
-The report includes the exact audit method and every recorded response.

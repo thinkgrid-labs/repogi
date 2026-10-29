@@ -14,12 +14,12 @@
   `repogi manifest-verify`. Nothing is executed or declared safe.
 
 ```sh
-code-intel impact --base HEAD                       # committed HEAD vs the working tree (default)
-code-intel impact --base main --head feature --format json
-code-intel impact --base HEAD~1 --head HEAD --detail --depth 3
-code-intel impact --base HEAD --summary --max-bytes 8000
-code-intel impact --base HEAD --evidence-file src/components/Card.tsx
-code-intel impact --base HEAD --tests               # advisory test discovery; no execution
+repogi impact --base HEAD                       # committed HEAD vs the working tree (default)
+repogi impact --base main --head feature --format json
+repogi impact --base HEAD~1 --head HEAD --detail --depth 3
+repogi impact --base HEAD --summary --max-bytes 8000
+repogi impact --base HEAD --evidence-file src/components/Card.tsx
+repogi impact --base HEAD --tests               # advisory test discovery; no execution
 ```
 
 | Option | Default | Meaning |
@@ -49,7 +49,7 @@ The engine reuses the existing crates: no new database, no new resolver, no sixt
 | Git access | `index` (`git.rs`) | Runs plumbing commands (`rev-parse`, `ls-tree`, `cat-file --batch`, `ls-files -s`, `hash-object --no-filters`, `check-attr`, `config --get`, and `diff -M --name-status` between two trees or with `--cached`) as argument vectors, with no shell. Hooks, fsmonitor, the untracked cache, external diff, textconv, replace objects and network protocols are disabled. `GIT_DIR`-style environment overrides are removed. Blob content is read raw: no clean or smudge filter runs. |
 | Snapshots | `index` (`snapshot.rs`) | Builds or reuses one Repogi index per analysed state. A snapshot is the existing indexer run over a source directory into a separate database (`index_snapshot`). |
 | Engine | `retrieval` (`impact.rs`) | Analysis over two read-only `Store`s: file and declaration diff, binding diff, incoming traversal, uncertainty and completeness. `impact::compare` is the entry point; `impact::summary::respond` renders the default, summary and selected-evidence views. |
-| Test discovery | `retrieval` (`tests.rs`) | `tests::compare` reuses the same comparison (`impact::inspect_comparison`) to classify probable test files; `tests::respond` renders and fits the plan (Phase 4.5). |
+| Test discovery | `retrieval` (`tests.rs`) | `tests::compare` reuses the same comparison (`impact::inspect_comparison`) to classify probable test files; `tests::respond` renders and fits the plan. |
 | CLI | `cli` | `repogi impact`: argument validation and rendering under a byte budget. |
 | MCP | `cli` (`mcp/tools.rs`) | The opt-in `atlas_impact` tool: argument validation, root confinement and error codes over the same `respond` functions. |
 
