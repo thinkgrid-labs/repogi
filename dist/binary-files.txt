@@ -426,8 +426,10 @@ licenses/dependencies/thiserror-2.0.21/LICENSE-APACHE
 licenses/dependencies/thiserror-2.0.21/LICENSE-MIT
 licenses/dependencies/thiserror-impl-2.0.21/LICENSE-APACHE
 licenses/dependencies/thiserror-impl-2.0.21/LICENSE-MIT
+licenses/dependencies/tree-sitter-0.24.7/LICENSE
 licenses/dependencies/tree-sitter-0.24.7/src/unicode/LICENSE
 licenses/dependencies/tree-sitter-language-0.1.7/LICENSE
+licenses/dependencies/tree-sitter-typescript-0.23.2/LICENSE
 licenses/dependencies/unicode-ident-1.0.27/LICENSE-APACHE
 licenses/dependencies/unicode-ident-1.0.27/LICENSE-MIT
 licenses/dependencies/unicode-ident-1.0.27/LICENSE-UNICODE

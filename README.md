@@ -11,8 +11,6 @@ Repogi indexes your repository locally and answers the questions agents usually 
 
 </div>
 
-> **Status:** developer preview (v0.1.0). It runs today from source. Prebuilt binaries will arrive with the first GitHub Release.
-
 ## Why Repogi?
 
 When a coding agent needs to know who calls a function, it typically greps for the name, opens each match and decides which hits are real. On a widely used function that means many tool calls and a lot of file content in context. It also produces false positives (same-name matches) and missed consumers (aliased or re-exported imports).
