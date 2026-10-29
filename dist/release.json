@@ -1,0 +1,11 @@
+{
+  "name": "Repogi",
+  "version": "0.1.0",
+  "repository": "https://github.com/thinkgrid-labs/repogi",
+  "license": "MIT",
+  "license_file": "LICENSE",
+  "copyright": "Copyright (c) 2026 ThinkGrid Labs",
+  "third_party_notices": "THIRD_PARTY_NOTICES.json",
+  "source_manifest": "dist/source-files.txt",
+  "proposed_binary_manifest": "dist/binary-files.txt"
+}

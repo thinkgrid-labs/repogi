@@ -1,7 +1,43 @@
+# Build output and local indexes
 /target/
 .code-intel/
 __pycache__/
 
-docs/
-benchmarks/
+# Internal evaluation, recordings and engineering records
+/benchmarks/
+/fixtures/benchmarks/
 /AGENTS.md
+/internal/
+/recordings/
+/sessions/
+/evaluations/
+/docs/internal/
+/docs/PHASE3*.md
+/docs/PHASE4*.md
+/docs/PHASE5*.md
+/docs/*BENCHMARK*.md
+/docs/*EVALUATION*.md
+/docs/PRD.md
+/docs/CHANGE_PREP_LABEL_REVIEW.md
+/docs/CHANGE_IMPACT_VALIDATION.md
+/docs/HOSTED_CI_SECURITY_REVIEW.md
+/docs/ATLAS_RELEASE_PROVENANCE.md
+/docs/EXTERNAL_PILOT_INTEGRATION.md
+/docs/AGENT_RETRIEVAL_EFFICIENCY.md
+/docs/AGENT_SIGNAL_QUALITY.md
+/docs/ROUTING_BENCHMARK_COMPATIBILITY.md
+/docs/DEVELOPER_PREVIEW_RELEASE_CHECKLIST.md
+
+# Superseded project-license asset, retained locally pending index cleanup.
+# Dependency Apache licenses under licenses/ and fixtures/ remain distributable.
+/LICENSE-APACHE
+/examples/ci/deployment_preflight.py
+/examples/ci/hosted-pilot-plan.json
+/examples/ci/reviewed-action-pins.json
+/examples/ci/verification-manifest-hosted.yml.example
+
+# Historical agent-facing engineering notes
+/docs/agents/atlas-impact-usage.md
+/docs/agents/atlas-retrieval-strategy.md
+/docs/agents/atlas-usage.md
+/docs/agents/atlas-workflows.md

@@ -89,6 +89,8 @@ repogi context "authenticate user" --format text
 
 The index is stored in `.code-intel/index.db` for compatibility with earlier versions. Indexing is explicit: rerun `repogi index .` after edits to update the graph.
 
+See the [installation guide](docs/DEVELOPER_PREVIEW_INSTALLATION.md), [MCP configuration](docs/MCP.md), [reference-first workflows](docs/REFERENCE_FIRST_AGENT_WORKFLOWS.md) and [navigation limits](docs/REFERENCE_NAVIGATION_LIMITS.md).
+
 ## Usage
 
 ### CLI commands
@@ -193,7 +195,7 @@ Repogi exposes a **read-only Model Context Protocol (MCP)** server that AI codin
 | `atlas_status` | Inspect index state and freshness. |
 | `atlas_impact` | Analyze change impact; opt-in only. |
 
-The `atlas_*` tool identifiers are intentionally retained for backward compatibility with existing MCP clients and recorded evaluations. The server itself is branded Repogi.
+The `atlas_*` tool identifiers are intentionally retained for backward compatibility with existing MCP clients. The server itself is branded Repogi.
 
 ### Claude Code
 
@@ -241,7 +243,7 @@ Repogi is a **developer preview (v0.1.0)**. It is currently built from source, w
 | **Freshness** | Index updates are manual; files may be flagged stale until reindexed. |
 | **Impact / tests** | Static and advisory. Results do not prove runtime failures or test coverage; affected-test discovery does not run tests. |
 | **Platforms** | Developed and tested primarily on Linux x86_64; other platforms are not verified here. |
-| **Agent outcomes** | Limited pilot evidence only; no general token, accuracy, or cost-saving guarantee is claimed. |
+| **Agent outcomes** | No general token, accuracy, or cost-saving guarantee is claimed. |
 
 ## FAQ
 
@@ -296,13 +298,15 @@ Contributions are welcome. Prefer scoped changes, fixture-backed tests, explicit
 
 ### Naming and compatibility
 
-Repogi previously used the working name **Atlas** and the `code-intel` executable. The executable is now `repogi`; old scripts invoking `code-intel` need to update their command. The `.code-intel/` index directory, `code-intel-*` Rust crate names, and `atlas_*` MCP tool identifiers are deliberately unchanged. Historical benchmark and protocol identifiers retain their original provenance.
+Repogi previously used the working name **Atlas** and the `code-intel` executable. The executable is now `repogi`; old scripts invoking `code-intel` need to update their command. The `.code-intel/` index directory, `code-intel-*` Rust crate names, and `atlas_*` MCP tool identifiers are deliberately unchanged. Protocol identifiers retain their existing compatibility names.
 
 ## License
 
-Repogi is dual-licensed under [MIT](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE), at your option.
+Repogi is licensed under the [MIT License](LICENSE). Copyright (c) 2026 ThinkGrid Labs.
 
-Unless explicitly stated otherwise, contributions intentionally submitted to Repogi are dual-licensed under those terms.
+Dependencies and third-party source fixtures retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Unless explicitly stated otherwise, contributions intentionally submitted to Repogi are licensed under MIT.
 
 ---
 

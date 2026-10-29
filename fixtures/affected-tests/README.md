@@ -2,15 +2,10 @@
 
 `repo/` is committed into a fresh temporary Git repository. Each case in
 `cases.json` applies literal source edits, optional renames/additions/removals and
-a second commit. Atlas reads it; no fixture test or project script executes.
+a second commit. Repogi reads it; no fixture test or project script executes.
 `package.json` and `vitest.config.ts` contain execution traps for that boundary.
 
-Labels were written from the fixture imports/calls before querying discovery.
-They are maintained separately from Atlas output. They assert exact file sets,
-terminal target file/name, shortest depth and, where relevant, baseline-only
-evidence. Possible/unknown labels are explicit required examples; they are not
-an exhaustive heuristic precision oracle. The reviewer is the implementing agent,
-not an independent human reviewer or an execution/coverage oracle.
+Expected sets describe literal fixture imports and calls. They test static discovery, not execution or coverage.
 
 | Cases | Independent source facts |
 |---|---|

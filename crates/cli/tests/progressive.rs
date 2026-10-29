@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     fs,
     path::Path,
     process::{Command, Output},
@@ -25,94 +24,6 @@ fn success(root: &Path, arguments: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()
-}
-
-fn fixture(corpus: &Value) -> TempDir {
-    let root = TempDir::new().unwrap();
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for file in corpus["files"].as_array().unwrap() {
-        let relative = file.as_str().unwrap();
-        let target = root.path().join(relative);
-        fs::create_dir_all(target.parent().unwrap()).unwrap();
-        fs::copy(
-            workspace
-                .join(corpus["path"].as_str().unwrap())
-                .join(relative),
-            target,
-        )
-        .unwrap();
-    }
-    success(root.path(), &["index", "."]);
-    root
-}
-
-#[test]
-fn persisted_graph_control_replays_every_phase1_reference_transcript_exactly() {
-    let suite: Value =
-        serde_json::from_str(include_str!("../../../benchmarks/suite.json")).unwrap();
-    let reference: Value =
-        serde_json::from_str(include_str!("../../../benchmarks/results/reference.json")).unwrap();
-    for corpus in suite["corpora"].as_array().unwrap() {
-        let root = fixture(corpus);
-        for cell in reference["cells"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|cell| cell["corpus"] == corpus["id"] && cell["engine"] == "atlas")
-        {
-            // The persisted ranking control remains byte-identical. CLI/MCP
-            // navigation now reserves space for current-source check metadata.
-            let store =
-                code_intel_store::Store::open_read(&root.path().join(".code-intel/index.db"))
-                    .unwrap();
-            let response = code_intel_retrieval::context_with_options(
-                &store,
-                cell["query"].as_str().unwrap(),
-                usize::try_from(cell["budget"].as_u64().unwrap()).unwrap(),
-                code_intel_retrieval::Format::Json,
-                &code_intel_retrieval::Options {
-                    strategy: code_intel_retrieval::Strategy::Graph,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            let actual =
-                code_intel_retrieval::render(&response, code_intel_retrieval::Format::Json)
-                    .unwrap();
-            assert_eq!(actual, cell["stdout"].as_str().unwrap());
-        }
-    }
-}
-
-#[test]
-fn optimized_evidence_has_no_contained_or_duplicate_snippets() {
-    let suite: Value =
-        serde_json::from_str(include_str!("../../../benchmarks/suite.json")).unwrap();
-    for corpus in suite["corpora"].as_array().unwrap() {
-        let root = fixture(corpus);
-        for task in corpus["tasks"].as_array().unwrap() {
-            let actual = success(
-                root.path(),
-                &[
-                    "context",
-                    task["query"].as_str().unwrap(),
-                    "--max-tokens",
-                    "8000",
-                ],
-            );
-            let response: ContextResponse = serde_json::from_str(&actual).unwrap();
-            let mut lines = BTreeSet::new();
-            for item in response.items {
-                for line in item.start_line..=item.end_line {
-                    assert!(
-                        lines.insert((item.path.clone(), line)),
-                        "duplicate source line {}:{line}",
-                        item.path
-                    );
-                }
-            }
-        }
-    }
 }
 
 #[test]

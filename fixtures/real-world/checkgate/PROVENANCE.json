@@ -2,11 +2,5 @@
   "repository": "https://github.com/checkgate-sh/checkgate.git",
   "commit": "a395365e514a642681b40524ac3312ccdf59a682",
   "upstream_prefix": "dashboard/src/",
-  "license": "Apache-2.0",
-  "files": {
-    "api.ts": "e4731b9402260dcb5ffa6f79ff4824f237b09c5dccd591eef35ceb8b04613a0b",
-    "types.ts": "bdbdc3ee9c09ce8d5d92fb8d3bb3460a41b4caae6098895bf3a761d1dd63508b",
-    "components/RuleEditor.tsx": "8398d4da5678135e7582965e7ebb9a3b05ca314fdd70faf1d773b96e68f13188",
-    "components/Drawer.tsx": "25dde5fc78f4dc10c3f1825f4881d48007f98a3731fb8fb620d88f511ea26421"
-  }
+  "license": "Apache-2.0"
 }

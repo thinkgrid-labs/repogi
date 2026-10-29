@@ -1,6 +1,6 @@
 # Optional template: replace reviewed action SHAs and configure the two trusted
 # repository variables before copying into .github/workflows. No project scripts.
-name: Atlas verification artifact
+name: Repogi verification artifact
 on:
   pull_request:
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || inputs.head }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Select trusted Atlas executable and compare existing commits
+      - name: Select trusted Repogi executable and compare existing commits
         shell: bash
         run: |
           set -euo pipefail
@@ -38,14 +38,14 @@ jobs:
           git --no-optional-locks cat-file -e "$HEAD_REV^{commit}"
           task_dir=$(mktemp -d "$RUNNER_TEMP/atlas-artifact.XXXXXX")
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-            "$ATLAS_URL" --output "$task_dir/code-intel"
-          printf '%s  %s\n' "$ATLAS_SHA256" "$task_dir/code-intel" | sha256sum --check --status
-          chmod 700 "$task_dir/code-intel"
-          "$task_dir/code-intel" impact "$GITHUB_WORKSPACE" \
+            "$ATLAS_URL" --output "$task_dir/repogi"
+          printf '%s  %s\n' "$ATLAS_SHA256" "$task_dir/repogi" | sha256sum --check --status
+          chmod 700 "$task_dir/repogi"
+          "$task_dir/repogi" impact "$GITHUB_WORKSPACE" \
             --base "$BASE_REV" --head "$HEAD_REV" --manifest --format json \
             --depth 2 --max-results 1000 --max-declarations 100 --max-bytes 8000000 \
             > "$task_dir/manifest.pending"
-          "$task_dir/code-intel" manifest-verify "$task_dir/manifest.pending" \
+          "$task_dir/repogi" manifest-verify "$task_dir/manifest.pending" \
             > "$task_dir/atlas-verification-integrity.json"
           mv "$task_dir/manifest.pending" "$task_dir/atlas-verification-manifest.json"
           printf 'ATLAS_ARTIFACT_DIR=%s\n' "$task_dir" >> "$GITHUB_ENV"

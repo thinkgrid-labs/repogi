@@ -1,0 +1,885 @@
+{
+  "scope": "Locked dependency census, including build/dev and target-conditional packages; not a claim that every package is linked on every platform.",
+  "packages": [
+    {
+      "name": "aho-corasick",
+      "version": "1.1.5",
+      "declared_license": "Unlicense OR MIT",
+      "repository": "https://github.com/BurntSushi/aho-corasick",
+      "license_files": [
+        "licenses/dependencies/aho-corasick-1.1.5/COPYING",
+        "licenses/dependencies/aho-corasick-1.1.5/LICENSE-MIT",
+        "licenses/dependencies/aho-corasick-1.1.5/UNLICENSE"
+      ]
+    },
+    {
+      "name": "anstream",
+      "version": "1.0.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "license_files": [
+        "licenses/dependencies/anstream-1.0.0/LICENSE-APACHE",
+        "licenses/dependencies/anstream-1.0.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "anstyle",
+      "version": "1.0.14",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "license_files": [
+        "licenses/dependencies/anstyle-1.0.14/LICENSE-APACHE",
+        "licenses/dependencies/anstyle-1.0.14/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "anstyle-parse",
+      "version": "1.0.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "license_files": [
+        "licenses/dependencies/anstyle-parse-1.0.0/LICENSE-APACHE",
+        "licenses/dependencies/anstyle-parse-1.0.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "anstyle-query",
+      "version": "1.1.5",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "license_files": [
+        "licenses/dependencies/anstyle-query-1.1.5/LICENSE-APACHE",
+        "licenses/dependencies/anstyle-query-1.1.5/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "anstyle-wincon",
+      "version": "3.0.11",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "license_files": [
+        "licenses/dependencies/anstyle-wincon-3.0.11/LICENSE-APACHE",
+        "licenses/dependencies/anstyle-wincon-3.0.11/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "anyhow",
+      "version": "1.0.104",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/anyhow",
+      "license_files": [
+        "licenses/dependencies/anyhow-1.0.104/LICENSE-APACHE",
+        "licenses/dependencies/anyhow-1.0.104/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "arrayvec",
+      "version": "0.7.8",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/bluss/arrayvec",
+      "license_files": [
+        "licenses/dependencies/arrayvec-0.7.8/LICENSE-APACHE",
+        "licenses/dependencies/arrayvec-0.7.8/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "base64",
+      "version": "0.22.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/marshallpierce/rust-base64",
+      "license_files": [
+        "licenses/dependencies/base64-0.22.1/LICENSE-APACHE",
+        "licenses/dependencies/base64-0.22.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "bitflags",
+      "version": "2.13.2",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/bitflags/bitflags",
+      "license_files": [
+        "licenses/dependencies/bitflags-2.13.2/LICENSE-APACHE",
+        "licenses/dependencies/bitflags-2.13.2/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "blake3",
+      "version": "1.8.7",
+      "declared_license": "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception",
+      "repository": "https://github.com/BLAKE3-team/BLAKE3",
+      "license_files": [
+        "licenses/dependencies/blake3-1.8.7/LICENSE_A2",
+        "licenses/dependencies/blake3-1.8.7/LICENSE_A2LLVM",
+        "licenses/dependencies/blake3-1.8.7/LICENSE_CC0"
+      ]
+    },
+    {
+      "name": "bstr",
+      "version": "1.13.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/BurntSushi/bstr",
+      "license_files": [
+        "licenses/dependencies/bstr-1.13.1/COPYING",
+        "licenses/dependencies/bstr-1.13.1/LICENSE-APACHE",
+        "licenses/dependencies/bstr-1.13.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "bumpalo",
+      "version": "3.20.3",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/fitzgen/bumpalo",
+      "license_files": [
+        "licenses/dependencies/bumpalo-3.20.3/LICENSE-APACHE",
+        "licenses/dependencies/bumpalo-3.20.3/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "cc",
+      "version": "1.8.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/cc-rs",
+      "license_files": [
+        "licenses/dependencies/cc-1.8.0/LICENSE-APACHE",
+        "licenses/dependencies/cc-1.8.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.5",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/cfg-if",
+      "license_files": [
+        "licenses/dependencies/cfg-if-1.0.5/LICENSE-APACHE",
+        "licenses/dependencies/cfg-if-1.0.5/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "clap",
+      "version": "4.6.7",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap",
+      "license_files": [
+        "licenses/dependencies/clap-4.6.7/LICENSE-APACHE",
+        "licenses/dependencies/clap-4.6.7/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "clap_builder",
+      "version": "4.6.7",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap",
+      "license_files": [
+        "licenses/dependencies/clap_builder-4.6.7/LICENSE-APACHE",
+        "licenses/dependencies/clap_builder-4.6.7/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "clap_derive",
+      "version": "4.6.7",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap",
+      "license_files": [
+        "licenses/dependencies/clap_derive-4.6.7/LICENSE-APACHE",
+        "licenses/dependencies/clap_derive-4.6.7/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "clap_lex",
+      "version": "1.1.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap",
+      "license_files": [
+        "licenses/dependencies/clap_lex-1.1.1/LICENSE-APACHE",
+        "licenses/dependencies/clap_lex-1.1.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "colorchoice",
+      "version": "1.0.5",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "license_files": [
+        "licenses/dependencies/colorchoice-1.0.5/LICENSE-APACHE",
+        "licenses/dependencies/colorchoice-1.0.5/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "constant_time_eq",
+      "version": "0.4.2",
+      "declared_license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
+      "repository": "https://github.com/cesarb/constant_time_eq",
+      "license_files": [
+        "licenses/dependencies/constant_time_eq-0.4.2/LICENSE-APACHE",
+        "licenses/dependencies/constant_time_eq-0.4.2/LICENSE-CC0",
+        "licenses/dependencies/constant_time_eq-0.4.2/LICENSE-MIT0"
+      ]
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils",
+      "license_files": [
+        "licenses/dependencies/cpufeatures-0.3.1/LICENSE-APACHE",
+        "licenses/dependencies/cpufeatures-0.3.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "crossbeam-deque",
+      "version": "0.8.8",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "license_files": [
+        "licenses/dependencies/crossbeam-deque-0.8.8/LICENSE-APACHE",
+        "licenses/dependencies/crossbeam-deque-0.8.8/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "crossbeam-epoch",
+      "version": "0.9.21",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "license_files": [
+        "licenses/dependencies/crossbeam-epoch-0.9.21/LICENSE-APACHE",
+        "licenses/dependencies/crossbeam-epoch-0.9.21/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "crossbeam-utils",
+      "version": "0.8.23",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/crossbeam-rs/crossbeam",
+      "license_files": [
+        "licenses/dependencies/crossbeam-utils-0.8.23/LICENSE-APACHE",
+        "licenses/dependencies/crossbeam-utils-0.8.23/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "errno",
+      "version": "0.3.14",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/lambda-fairy/rust-errno",
+      "license_files": [
+        "licenses/dependencies/errno-0.3.14/LICENSE-APACHE",
+        "licenses/dependencies/errno-0.3.14/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "fallible-iterator",
+      "version": "0.3.0",
+      "declared_license": "MIT/Apache-2.0",
+      "repository": "https://github.com/sfackler/rust-fallible-iterator",
+      "license_files": [
+        "licenses/dependencies/fallible-iterator-0.3.0/LICENSE-APACHE",
+        "licenses/dependencies/fallible-iterator-0.3.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "fallible-streaming-iterator",
+      "version": "0.1.9",
+      "declared_license": "MIT/Apache-2.0",
+      "repository": "https://github.com/sfackler/fallible-streaming-iterator",
+      "license_files": [
+        "licenses/dependencies/fallible-streaming-iterator-0.1.9/LICENSE-APACHE",
+        "licenses/dependencies/fallible-streaming-iterator-0.1.9/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "fastrand",
+      "version": "2.5.0",
+      "declared_license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/smol-rs/fastrand",
+      "license_files": [
+        "licenses/dependencies/fastrand-2.5.0/LICENSE-APACHE",
+        "licenses/dependencies/fastrand-2.5.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "find-msvc-tools",
+      "version": "0.1.14",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/cc-rs",
+      "license_files": [
+        "licenses/dependencies/find-msvc-tools-0.1.14/LICENSE-APACHE",
+        "licenses/dependencies/find-msvc-tools-0.1.14/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "foldhash",
+      "version": "0.2.0",
+      "declared_license": "Zlib",
+      "repository": "https://github.com/orlp/foldhash",
+      "license_files": [
+        "licenses/dependencies/foldhash-0.2.0/LICENSE"
+      ]
+    },
+    {
+      "name": "getrandom",
+      "version": "0.4.3",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-random/getrandom",
+      "license_files": [
+        "licenses/dependencies/getrandom-0.4.3/LICENSE-APACHE",
+        "licenses/dependencies/getrandom-0.4.3/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "globset",
+      "version": "0.4.19",
+      "declared_license": "Unlicense OR MIT",
+      "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/globset",
+      "license_files": [
+        "licenses/dependencies/globset-0.4.19/COPYING",
+        "licenses/dependencies/globset-0.4.19/LICENSE-MIT",
+        "licenses/dependencies/globset-0.4.19/UNLICENSE"
+      ]
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.16.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "license_files": [
+        "licenses/dependencies/hashbrown-0.16.1/LICENSE-APACHE",
+        "licenses/dependencies/hashbrown-0.16.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.17.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "license_files": [
+        "licenses/dependencies/hashbrown-0.17.1/LICENSE-APACHE",
+        "licenses/dependencies/hashbrown-0.17.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "hashlink",
+      "version": "0.12.2",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/djc/hashlink",
+      "license_files": [
+        "licenses/dependencies/hashlink-0.12.2/LICENSE-APACHE",
+        "licenses/dependencies/hashlink-0.12.2/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "heck",
+      "version": "0.5.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/withoutboats/heck",
+      "license_files": [
+        "licenses/dependencies/heck-0.5.0/LICENSE-APACHE",
+        "licenses/dependencies/heck-0.5.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "ignore",
+      "version": "0.4.30",
+      "declared_license": "Unlicense OR MIT",
+      "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore",
+      "license_files": [
+        "licenses/dependencies/ignore-0.4.30/COPYING",
+        "licenses/dependencies/ignore-0.4.30/LICENSE-MIT",
+        "licenses/dependencies/ignore-0.4.30/UNLICENSE"
+      ]
+    },
+    {
+      "name": "is_terminal_polyfill",
+      "version": "1.70.2",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/polyfill-rs/is_terminal_polyfill",
+      "license_files": [
+        "licenses/dependencies/is_terminal_polyfill-1.70.2/LICENSE-APACHE",
+        "licenses/dependencies/is_terminal_polyfill-1.70.2/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.18",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/itoa",
+      "license_files": [
+        "licenses/dependencies/itoa-1.0.18/LICENSE-APACHE",
+        "licenses/dependencies/itoa-1.0.18/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "js-sys",
+      "version": "0.3.106",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys",
+      "license_files": [
+        "licenses/dependencies/js-sys-0.3.106/LICENSE-APACHE",
+        "licenses/dependencies/js-sys-0.3.106/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "libc",
+      "version": "0.2.191",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/libc",
+      "license_files": [
+        "licenses/dependencies/libc-0.2.191/LICENSE-APACHE",
+        "licenses/dependencies/libc-0.2.191/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "libsqlite3-sys",
+      "version": "0.38.2",
+      "declared_license": "MIT",
+      "repository": "https://github.com/rusqlite/rusqlite",
+      "license_files": [
+        "licenses/dependencies/libsqlite3-sys-0.38.2/LICENSE",
+        "licenses/dependencies/libsqlite3-sys-0.38.2/sqlcipher/LICENSE"
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.12.1",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "repository": "https://github.com/sunfishcode/linux-raw-sys",
+      "license_files": [
+        "licenses/dependencies/linux-raw-sys-0.12.1/COPYRIGHT",
+        "licenses/dependencies/linux-raw-sys-0.12.1/LICENSE-APACHE",
+        "licenses/dependencies/linux-raw-sys-0.12.1/LICENSE-Apache-2.0_WITH_LLVM-exception",
+        "licenses/dependencies/linux-raw-sys-0.12.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "log",
+      "version": "0.4.34",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/log",
+      "license_files": [
+        "licenses/dependencies/log-0.4.34/LICENSE-APACHE",
+        "licenses/dependencies/log-0.4.34/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.3",
+      "declared_license": "Unlicense OR MIT",
+      "repository": "https://github.com/BurntSushi/memchr",
+      "license_files": [
+        "licenses/dependencies/memchr-2.8.3/COPYING",
+        "licenses/dependencies/memchr-2.8.3/LICENSE-MIT",
+        "licenses/dependencies/memchr-2.8.3/UNLICENSE"
+      ]
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/matklad/once_cell",
+      "license_files": [
+        "licenses/dependencies/once_cell-1.21.4/LICENSE-APACHE",
+        "licenses/dependencies/once_cell-1.21.4/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "once_cell_polyfill",
+      "version": "1.70.2",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/polyfill-rs/once_cell_polyfill",
+      "license_files": [
+        "licenses/dependencies/once_cell_polyfill-1.70.2/LICENSE-APACHE",
+        "licenses/dependencies/once_cell_polyfill-1.70.2/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "pkg-config",
+      "version": "0.3.34",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/pkg-config-rs",
+      "license_files": [
+        "licenses/dependencies/pkg-config-0.3.34/LICENSE-APACHE",
+        "licenses/dependencies/pkg-config-0.3.34/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/proc-macro2",
+      "license_files": [
+        "licenses/dependencies/proc-macro2-1.0.107/LICENSE-APACHE",
+        "licenses/dependencies/proc-macro2-1.0.107/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/quote",
+      "license_files": [
+        "licenses/dependencies/quote-1.0.47/LICENSE-APACHE",
+        "licenses/dependencies/quote-1.0.47/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "r-efi",
+      "version": "6.0.0",
+      "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+      "repository": "https://github.com/r-efi/r-efi",
+      "license_files": []
+    },
+    {
+      "name": "regex",
+      "version": "1.13.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/regex",
+      "license_files": [
+        "licenses/dependencies/regex-1.13.1/LICENSE-APACHE",
+        "licenses/dependencies/regex-1.13.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "regex-automata",
+      "version": "0.4.18",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/regex",
+      "license_files": [
+        "licenses/dependencies/regex-automata-0.4.18/LICENSE-APACHE",
+        "licenses/dependencies/regex-automata-0.4.18/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "regex-syntax",
+      "version": "0.8.11",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/regex",
+      "license_files": [
+        "licenses/dependencies/regex-syntax-0.8.11/LICENSE-APACHE",
+        "licenses/dependencies/regex-syntax-0.8.11/LICENSE-MIT",
+        "licenses/dependencies/regex-syntax-0.8.11/src/unicode_tables/LICENSE-UNICODE"
+      ]
+    },
+    {
+      "name": "rsqlite-vfs",
+      "version": "0.1.1",
+      "declared_license": "MIT",
+      "repository": null,
+      "license_files": []
+    },
+    {
+      "name": "rusqlite",
+      "version": "0.40.2",
+      "declared_license": "MIT",
+      "repository": "https://github.com/rusqlite/rusqlite",
+      "license_files": [
+        "licenses/dependencies/rusqlite-0.40.2/LICENSE"
+      ]
+    },
+    {
+      "name": "rustix",
+      "version": "1.1.5",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "repository": "https://github.com/bytecodealliance/rustix",
+      "license_files": [
+        "licenses/dependencies/rustix-1.1.5/COPYRIGHT",
+        "licenses/dependencies/rustix-1.1.5/LICENSE-APACHE",
+        "licenses/dependencies/rustix-1.1.5/LICENSE-Apache-2.0_WITH_LLVM-exception",
+        "licenses/dependencies/rustix-1.1.5/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "rustversion",
+      "version": "1.0.23",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/rustversion",
+      "license_files": [
+        "licenses/dependencies/rustversion-1.0.23/LICENSE-APACHE",
+        "licenses/dependencies/rustversion-1.0.23/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "same-file",
+      "version": "1.0.6",
+      "declared_license": "Unlicense/MIT",
+      "repository": "https://github.com/BurntSushi/same-file",
+      "license_files": [
+        "licenses/dependencies/same-file-1.0.6/COPYING",
+        "licenses/dependencies/same-file-1.0.6/LICENSE-MIT",
+        "licenses/dependencies/same-file-1.0.6/UNLICENSE"
+      ]
+    },
+    {
+      "name": "serde",
+      "version": "1.0.229",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/serde",
+      "license_files": [
+        "licenses/dependencies/serde-1.0.229/LICENSE-APACHE",
+        "licenses/dependencies/serde-1.0.229/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "serde_core",
+      "version": "1.0.229",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/serde",
+      "license_files": [
+        "licenses/dependencies/serde_core-1.0.229/LICENSE-APACHE",
+        "licenses/dependencies/serde_core-1.0.229/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.229",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/serde",
+      "license_files": [
+        "licenses/dependencies/serde_derive-1.0.229/LICENSE-APACHE",
+        "licenses/dependencies/serde_derive-1.0.229/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.154",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/serde-rs/json",
+      "license_files": [
+        "licenses/dependencies/serde_json-1.0.154/LICENSE-APACHE",
+        "licenses/dependencies/serde_json-1.0.154/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "shlex",
+      "version": "2.0.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/comex/rust-shlex",
+      "license_files": [
+        "licenses/dependencies/shlex-2.0.1/LICENSE-APACHE",
+        "licenses/dependencies/shlex-2.0.1/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "smallvec",
+      "version": "1.16.3",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/servo/rust-smallvec",
+      "license_files": [
+        "licenses/dependencies/smallvec-1.16.3/LICENSE-APACHE",
+        "licenses/dependencies/smallvec-1.16.3/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "sqlite-wasm-rs",
+      "version": "0.5.5",
+      "declared_license": "MIT",
+      "repository": "https://github.com/Spxg/sqlite-wasm-rs",
+      "license_files": [
+        "licenses/dependencies/sqlite-wasm-rs-0.5.5/LICENSE"
+      ]
+    },
+    {
+      "name": "streaming-iterator",
+      "version": "0.1.9",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/sfackler/streaming-iterator",
+      "license_files": [
+        "licenses/dependencies/streaming-iterator-0.1.9/LICENSE-APACHE",
+        "licenses/dependencies/streaming-iterator-0.1.9/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "strsim",
+      "version": "0.11.1",
+      "declared_license": "MIT",
+      "repository": "https://github.com/rapidfuzz/strsim-rs",
+      "license_files": [
+        "licenses/dependencies/strsim-0.11.1/LICENSE"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "3.0.9",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/syn",
+      "license_files": [
+        "licenses/dependencies/syn-3.0.9/LICENSE-APACHE",
+        "licenses/dependencies/syn-3.0.9/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "tempfile",
+      "version": "3.27.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Stebalien/tempfile",
+      "license_files": [
+        "licenses/dependencies/tempfile-3.27.0/LICENSE-APACHE",
+        "licenses/dependencies/tempfile-3.27.0/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.21",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/thiserror",
+      "license_files": [
+        "licenses/dependencies/thiserror-2.0.21/LICENSE-APACHE",
+        "licenses/dependencies/thiserror-2.0.21/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.21",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/thiserror",
+      "license_files": [
+        "licenses/dependencies/thiserror-impl-2.0.21/LICENSE-APACHE",
+        "licenses/dependencies/thiserror-impl-2.0.21/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "tree-sitter",
+      "version": "0.24.7",
+      "declared_license": "MIT",
+      "repository": "https://github.com/tree-sitter/tree-sitter",
+      "license_files": [
+        "licenses/dependencies/tree-sitter-0.24.7/src/unicode/LICENSE"
+      ]
+    },
+    {
+      "name": "tree-sitter-language",
+      "version": "0.1.7",
+      "declared_license": "MIT",
+      "repository": "https://github.com/tree-sitter/tree-sitter",
+      "license_files": [
+        "licenses/dependencies/tree-sitter-language-0.1.7/LICENSE"
+      ]
+    },
+    {
+      "name": "tree-sitter-typescript",
+      "version": "0.23.2",
+      "declared_license": "MIT",
+      "repository": "https://github.com/tree-sitter/tree-sitter-typescript",
+      "license_files": []
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.27",
+      "declared_license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "repository": "https://github.com/dtolnay/unicode-ident",
+      "license_files": [
+        "licenses/dependencies/unicode-ident-1.0.27/LICENSE-APACHE",
+        "licenses/dependencies/unicode-ident-1.0.27/LICENSE-MIT",
+        "licenses/dependencies/unicode-ident-1.0.27/LICENSE-UNICODE"
+      ]
+    },
+    {
+      "name": "utf8parse",
+      "version": "0.2.2",
+      "declared_license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/alacritty/vte",
+      "license_files": [
+        "licenses/dependencies/utf8parse-0.2.2/LICENSE-APACHE",
+        "licenses/dependencies/utf8parse-0.2.2/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "vcpkg",
+      "version": "0.2.15",
+      "declared_license": "MIT/Apache-2.0",
+      "repository": "https://github.com/mcgoo/vcpkg-rs",
+      "license_files": [
+        "licenses/dependencies/vcpkg-0.2.15/LICENSE-APACHE",
+        "licenses/dependencies/vcpkg-0.2.15/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "walkdir",
+      "version": "2.5.0",
+      "declared_license": "Unlicense/MIT",
+      "repository": "https://github.com/BurntSushi/walkdir",
+      "license_files": [
+        "licenses/dependencies/walkdir-2.5.0/COPYING",
+        "licenses/dependencies/walkdir-2.5.0/LICENSE-MIT",
+        "licenses/dependencies/walkdir-2.5.0/UNLICENSE"
+      ]
+    },
+    {
+      "name": "wasm-bindgen",
+      "version": "0.2.129",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/wasm-bindgen/wasm-bindgen",
+      "license_files": [
+        "licenses/dependencies/wasm-bindgen-0.2.129/LICENSE-APACHE",
+        "licenses/dependencies/wasm-bindgen-0.2.129/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wasm-bindgen-macro",
+      "version": "0.2.129",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro",
+      "license_files": [
+        "licenses/dependencies/wasm-bindgen-macro-0.2.129/LICENSE-APACHE",
+        "licenses/dependencies/wasm-bindgen-macro-0.2.129/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wasm-bindgen-macro-support",
+      "version": "0.2.129",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support",
+      "license_files": [
+        "licenses/dependencies/wasm-bindgen-macro-support-0.2.129/LICENSE-APACHE",
+        "licenses/dependencies/wasm-bindgen-macro-support-0.2.129/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "wasm-bindgen-shared",
+      "version": "0.2.129",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared",
+      "license_files": [
+        "licenses/dependencies/wasm-bindgen-shared-0.2.129/LICENSE-APACHE",
+        "licenses/dependencies/wasm-bindgen-shared-0.2.129/LICENSE-MIT"
+      ]
+    },
+    {
+      "name": "winapi-util",
+      "version": "0.1.11",
+      "declared_license": "Unlicense OR MIT",
+      "repository": "https://github.com/BurntSushi/winapi-util",
+      "license_files": [
+        "licenses/dependencies/winapi-util-0.1.11/COPYING",
+        "licenses/dependencies/winapi-util-0.1.11/LICENSE-MIT",
+        "licenses/dependencies/winapi-util-0.1.11/UNLICENSE"
+      ]
+    },
+    {
+      "name": "windows-link",
+      "version": "0.2.1",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "license_files": [
+        "licenses/dependencies/windows-link-0.2.1/license-apache-2.0",
+        "licenses/dependencies/windows-link-0.2.1/license-mit"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "license_files": [
+        "licenses/dependencies/windows-sys-0.61.2/license-apache-2.0",
+        "licenses/dependencies/windows-sys-0.61.2/license-mit"
+      ]
+    },
+    {
+      "name": "zmij",
+      "version": "1.0.23",
+      "declared_license": "MIT",
+      "repository": "https://github.com/dtolnay/zmij",
+      "license_files": [
+        "licenses/dependencies/zmij-1.0.23/LICENSE-MIT"
+      ]
+    }
+  ]
+}

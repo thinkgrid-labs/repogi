@@ -397,7 +397,7 @@ fn cancelled_requests_receive_no_response() {
 
 #[test]
 fn context_tool_reuses_cli_retrieval_byte_for_byte() {
-    let (_temp, root) = fixture("benchmarks/service");
+    let (_temp, root) = fixture("typescript");
     let mut server = Server::ready(&[&root]);
     for (retrieval, detail) in [
         ("optimized", "detailed"),
@@ -785,7 +785,7 @@ fn every_tool_bounds_its_rendered_output() {
 #[test]
 fn roots_and_paths_are_confined() {
     let (_temp, root) = fixture("semantics");
-    let (_other_temp, other) = fixture("benchmarks/web");
+    let (_other_temp, other) = fixture("typescript");
     let outside = TempDir::new().unwrap();
     let mut server = Server::ready(&[&root]);
     for path in [
@@ -836,11 +836,11 @@ fn roots_and_paths_are_confined() {
         both.error_code("atlas_context", json!({"task":"filter"})),
         "root_required"
     );
-    let web = both.ok(
+    let selected = both.ok(
         "atlas_context",
-        json!({"task":"filter products","root": other_text}),
+        json!({"task":"authenticate user","root": other_text}),
     );
-    assert!(web.contains("filterProducts"), "{web}");
+    assert!(selected.contains("authenticate"), "{selected}");
     let status = both.json("atlas_status", json!({"root": other_text}));
     assert_eq!(
         status["server"]["configured_roots"]
@@ -1165,7 +1165,7 @@ fn custom_tool_sets_get_instructions_for_the_listed_tools() {
 #[test]
 fn profiles_select_tools_and_shrink_schemas_without_changing_results() {
     let (_temp, root) = fixture("semantics");
-    let (_other_temp, other) = fixture("benchmarks/web");
+    let (_other_temp, other) = fixture("typescript");
     let list =
         |server: &mut Server| server.request(5, "tools/list", json!({}))["result"]["tools"].clone();
     let names = |tools: &Value| {

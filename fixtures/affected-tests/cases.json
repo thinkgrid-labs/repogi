@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "description": "Independent source-reviewed file/target/depth labels. Test bodies call the imports shown in repo; overload/dispatch inference is not used. Never generated from Atlas.",
+ "description": "Expected file/target/depth sets for literal fixture imports and calls. No runtime coverage or dispatch inference is asserted.",
  "cases": [
   {
    "id": "function-and-unit",

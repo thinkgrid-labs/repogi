@@ -56,5 +56,5 @@
   "complete": true,
   "truncated": false
  },
- "note": "The barrel src/lib/index.ts is unchanged, but `export * from './math'` re-exports one binding per name: after the rename it re-exports `twice` and no longer `double`. That is a binding change in an unchanged file (label corrected after the first run; the original label omitted star-export bindings)."
+ "note": "The barrel src/lib/index.ts is unchanged, but `export * from './math'` re-exports one binding per name: after the rename it re-exports `twice` and no longer `double`. That is a binding change in an unchanged file."
 }

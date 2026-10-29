@@ -348,64 +348,6 @@ export function mutate() { ({ invoke } = { invoke: values[0] }); invoke('unknown
 }
 
 #[test]
-fn persisted_optimized_control_replays_the_frozen_phase1_5_estimate_transcripts() {
-    let suite: Value =
-        serde_json::from_str(include_str!("../../../benchmarks/suite.json")).unwrap();
-    let reference: Value = serde_json::from_str(include_str!(
-        "../../../benchmarks/results/optimization.json"
-    ))
-    .unwrap();
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut replayed = 0;
-    for corpus in suite["corpora"].as_array().unwrap() {
-        let root = TempDir::new().unwrap();
-        for file in corpus["files"].as_array().unwrap() {
-            let relative = file.as_str().unwrap();
-            let target = root.path().join(relative);
-            fs::create_dir_all(target.parent().unwrap()).unwrap();
-            fs::copy(
-                workspace
-                    .join(corpus["path"].as_str().unwrap())
-                    .join(relative),
-                target,
-            )
-            .unwrap();
-        }
-        output(root.path(), &["index", "."]);
-        for cell in reference["cells"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|cell| {
-                cell["corpus"] == corpus["id"]
-                    && cell["engine"] == "optimized"
-                    && cell["kind"] == "estimate"
-            })
-        {
-            // Frozen ranking bytes exclude the additive navigation envelope.
-            let store =
-                code_intel_store::Store::open_read(&root.path().join(".code-intel/index.db"))
-                    .unwrap();
-            let response = code_intel_retrieval::context_with_options(
-                &store,
-                cell["query"].as_str().unwrap(),
-                usize::try_from(cell["ceiling"].as_u64().unwrap()).unwrap(),
-                code_intel_retrieval::Format::Json,
-                &code_intel_retrieval::Options::default(),
-            )
-            .unwrap();
-            assert_eq!(
-                code_intel_retrieval::render(&response, code_intel_retrieval::Format::Json)
-                    .unwrap(),
-                cell["stdout"].as_str().unwrap()
-            );
-            replayed += 1;
-        }
-    }
-    assert_eq!(replayed, 56);
-}
-
-#[test]
 fn generic_awaited_calls_and_parentheses_keep_static_bindings() {
     let root = fixture();
     fs::write(
@@ -457,72 +399,6 @@ fn star_reexports_keep_their_actual_source_site_and_explicit_exports_win() {
     assert_eq!(original.len(), 1);
     assert_eq!(original[0]["location"]["start_line"], 3);
     assert_eq!(original[0]["status"], "resolved");
-}
-
-#[test]
-fn pinned_real_world_sites_resolve_without_promoting_unknown_receivers() {
-    let suite: Value =
-        serde_json::from_str(include_str!("../../../benchmarks/semantic_suite.json")).unwrap();
-    let gold: Value =
-        serde_json::from_str(include_str!("../../../benchmarks/semantic_gold.json")).unwrap();
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for corpus in suite["corpora"].as_array().unwrap() {
-        let root = TempDir::new().unwrap();
-        for file in corpus["files"].as_array().unwrap() {
-            let relative = file.as_str().unwrap();
-            let target = root.path().join(relative);
-            fs::create_dir_all(target.parent().unwrap()).unwrap();
-            fs::copy(
-                workspace
-                    .join(corpus["path"].as_str().unwrap())
-                    .join(relative),
-                target,
-            )
-            .unwrap();
-        }
-        output(root.path(), &["index", "."]);
-        let edges = graph(root.path());
-        let labels = &gold["corpora"][corpus["id"].as_str().unwrap()];
-        let db = rusqlite::Connection::open(root.path().join(".code-intel/index.db")).unwrap();
-        for site in labels["sites"].as_array().unwrap() {
-            let matches: Vec<_> = edges
-                .iter()
-                .filter(|edge| {
-                    edge["kind"] == site["kind"]
-                        && edge["target_text"] == site["text"]
-                        && edge["location"]["path"] == site["path"]
-                        && edge["location"]["start_line"] == site["line"]
-                })
-                .collect();
-            assert_eq!(matches.len(), 1, "{site}");
-            if site["target"].is_null() || site["text"] == "updateRule" {
-                assert!(matches[0]["target_id"].is_null(), "{site}");
-            } else {
-                assert_eq!(matches[0]["status"], "resolved", "{site}");
-                let target: String = db
-                    .query_row(
-                        "SELECT data FROM facts WHERE id=?1",
-                        [matches[0]["target_id"].as_str().unwrap()],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                let target: Value = serde_json::from_str(&target).unwrap();
-                assert_eq!(target["path"], site["target"][0]);
-                assert_eq!(target["name"], site["target"][1]);
-            }
-        }
-        for span in labels["forbidden_ranges"].as_array().unwrap() {
-            assert!(
-                !edges
-                    .iter()
-                    .any(|edge| edge["location"]["path"] == span["path"]
-                        && edge["location"]["start_line"].as_u64().unwrap()
-                            >= span["start_line"].as_u64().unwrap()
-                        && edge["location"]["start_line"].as_u64().unwrap()
-                            <= span["end_line"].as_u64().unwrap())
-            );
-        }
-    }
 }
 
 #[test]

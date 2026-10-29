@@ -2,13 +2,5 @@
   "repository": "https://github.com/recached-sh/recached.git",
   "commit": "d70b3611a4ce8e31c65b51f271c75755dee7f528",
   "upstream_prefix": "sdks/recached-react/src/",
-  "license": "Apache-2.0",
-  "files": {
-    "context.tsx": "25c3bcffe1bbca3561a9101022d432847212f66dbdfd4cee803a1cecea4d85be",
-    "index.ts": "cf47ac161d7db121159fc8bcf8ab93055ef89d1d037d5567edb8938530c44b48",
-    "subscribe.ts": "61bb2de67f1957fd39f7cae4e9751a65cd1139e3624518ee24a2df08466ef4a6",
-    "useKey.ts": "e4bb32763cc3e05579592fc08c1ae3ef4a6830ed82b5fdcbc16234e8b7eea146",
-    "useKeys.ts": "6e0e568b5f4e5f414708ba8fd145d4e835aec82c006ba6351f99fc3bdcf0ea08",
-    "usePubSub.ts": "73554799d1c97614ebad701edb2ba58cd3023e8dc2d6586202b0349e1ffca7f0"
-  }
+  "license": "Apache-2.0"
 }
