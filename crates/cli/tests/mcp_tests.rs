@@ -142,7 +142,9 @@ fn copy(from: &Path, to: &Path) {
         if entry.path().is_dir() {
             copy(&entry.path(), &target);
         } else {
-            fs::copy(entry.path(), target).unwrap();
+            // Fresh mtimes: macOS `fs::copy` keeps the source times, which can hide
+            // same-size overlay edits from Git's stat check.
+            fs::write(target, fs::read(entry.path()).unwrap()).unwrap();
         }
     }
 }

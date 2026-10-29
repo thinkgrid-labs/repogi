@@ -167,7 +167,9 @@ fn copy_dir(from: &Path, to: &Path) {
         if path.is_dir() {
             copy_dir(&path, &target);
         } else {
-            std::fs::copy(&path, &target).unwrap();
+            // Fresh mtimes: macOS `fs::copy` keeps the source times, which can hide
+            // same-size overlay edits from Git's stat check.
+            std::fs::write(&target, std::fs::read(&path).unwrap()).unwrap();
         }
     }
 }

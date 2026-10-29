@@ -279,7 +279,7 @@ impl Git {
                 !path.contains('\n'),
                 "path with newline is unsupported: {path:?}"
             );
-            let absolute = self.root.join(path);
+            let absolute = git_path(&self.root.join(path));
             input.extend_from_slice(absolute.to_str().context("non-UTF-8 path")?.as_bytes());
             input.push(b'\n');
         }
@@ -389,10 +389,26 @@ fn is_oid(text: &str) -> bool {
     matches!(text.len(), 40 | 64) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// The form of a canonical path that Git can open. On Windows `canonicalize`
+/// returns verbatim `\\?\` paths, which Git for Windows rejects; elsewhere the
+/// path is unchanged.
+fn git_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(text) = path.to_str() {
+        if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{share}"));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(local);
+        }
+    }
+    path.to_path_buf()
+}
+
 fn command(cwd: &Path, ceiling: Option<&Path>) -> Command {
     let mut command = Command::new("git");
     if let Some(ceiling) = ceiling {
-        command.env("GIT_CEILING_DIRECTORIES", ceiling);
+        command.env("GIT_CEILING_DIRECTORIES", git_path(ceiling));
     }
     command
         .current_dir(cwd)

@@ -135,7 +135,9 @@ fn configs(
         let parent = Path::new(path).parent().unwrap_or(Path::new(""));
         if let Some(dir) = value.pointer("/directories/test").and_then(serde_json::Value::as_str) {
             let dir = dir.strip_prefix("./").unwrap_or(dir);
-            let relative = parent.join(dir).to_string_lossy().into_owned();
+            // Repository paths always use `/`; `Path::join` would insert `\` on Windows.
+            let parent = parent.to_string_lossy();
+            let relative = if parent.is_empty() { dir.to_owned() } else { format!("{parent}/{dir}") };
             if safe_relative(&relative) && !relative.contains(['*', '?', '{', '}']) {
                 directories.push(relative.clone());
                 info.hints.push(format!("manifest directories.test={relative}"));

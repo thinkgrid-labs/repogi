@@ -157,7 +157,7 @@ jobs:
           [[ "$(rustc -vV | sed -n 's/^host: //p')" == "$TARGET" ]] || { echo "::error::runner host is not $TARGET"; exit 1; }
 
       - name: Run tests
-        run: cargo test --workspace --locked --target "$TARGET" -- --test-threads=1
+        run: cargo test --workspace --locked --no-fail-fast --target "$TARGET" -- --test-threads=1
 
       - name: Build release executable
         run: cargo build --release --locked -p code-intel-cli --target "$TARGET"

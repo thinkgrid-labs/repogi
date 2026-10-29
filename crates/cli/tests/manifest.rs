@@ -149,7 +149,9 @@ fn cold_warm_evicted_and_relocated_states_have_identical_bytes() {
             if entry.file_type().unwrap().is_dir() {
                 copy(&entry.path(), &target);
             } else {
-                fs::copy(entry.path(), target).unwrap();
+                // Fresh mtimes: macOS `fs::copy` keeps the source times, which can hide
+                // same-size overlay edits from Git's stat check.
+                fs::write(target, fs::read(entry.path()).unwrap()).unwrap();
             }
         }
     }
