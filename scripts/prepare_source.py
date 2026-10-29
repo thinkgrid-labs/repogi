@@ -13,9 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {
     '.gitignore', '.gitattributes', 'Cargo.toml', 'Cargo.lock', 'LICENSE',
     'README.md', 'THIRD_PARTY_NOTICES.md', 'licenses/THIRD_PARTY_NOTICES.json',
+    'install.sh', 'install.ps1',
 }
 PUBLIC_ROOTS = {'assets', 'crates', 'docs', 'examples', 'fixtures', 'licenses', 'dist', 'scripts'}
-PUBLIC_CONFIG_FILES = {'.github/workflows/ci.yml'}
+PUBLIC_CONFIG_FILES = {'.github/workflows/ci.yml', '.github/workflows/release.yml'}
 EXCLUDED = {
     'LICENSE-APACHE', 'AGENTS.md', 'docs/PRD.md',
     'docs/DEVELOPER_PREVIEW_RELEASE_CHECKLIST.md',

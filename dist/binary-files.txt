@@ -1,5 +1,6 @@
 .gitattributes
 .github/workflows/ci.yml
+.github/workflows/release.yml
 .gitignore
 Cargo.lock
 Cargo.toml
@@ -95,6 +96,7 @@ docs/MODULE_RESOLUTION.md
 docs/README.md
 docs/REFERENCE_FIRST_AGENT_WORKFLOWS.md
 docs/REFERENCE_NAVIGATION_LIMITS.md
+docs/RELEASES.md
 docs/SEMANTICS.md
 docs/SUPPORTED_LANGUAGES.md
 docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md
@@ -269,6 +271,8 @@ fixtures/typescript/src/barrel.ts
 fixtures/typescript/src/broken.ts
 fixtures/typescript/src/types.ts
 fixtures/typescript/src/ui.tsx
+install.ps1
+install.sh
 licenses/THIRD_PARTY_NOTICES.json
 licenses/dependencies/aho-corasick-1.1.5/COPYING
 licenses/dependencies/aho-corasick-1.1.5/LICENSE-MIT
@@ -453,3 +457,11 @@ licenses/dependencies/zmij-1.0.23/LICENSE-MIT
 licenses/native/SQLITE_HEADER.txt
 licenses/rust/COPYRIGHT-library.html
 scripts/prepare_source.py
+scripts/release/assemble.py
+scripts/release/check_notices.py
+scripts/release/contract.py
+scripts/release/inspect_binary.py
+scripts/release/package.py
+scripts/release/smoke.py
+scripts/release/tests/mcp_sdk_check.py
+scripts/release/tests/test_installers.py

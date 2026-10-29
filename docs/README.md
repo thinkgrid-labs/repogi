@@ -1,6 +1,6 @@
 # Repogi documentation
 
-Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md), then configure a client through [MCP](MCP.md). Repogi indexes TypeScript and TSX; see [supported languages](SUPPORTED_LANGUAGES.md).
+Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md) (prebuilt binaries, checksums and source builds; [release assets](RELEASES.md)), then configure a client through [MCP](MCP.md). Repogi indexes TypeScript and TSX; see [supported languages](SUPPORTED_LANGUAGES.md).
 
 ## Using Repogi
 
@@ -19,5 +19,7 @@ Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md), then configure a c
 ## Contributing
 
 [GitHub Actions CI](../.github/workflows/ci.yml) checks public source membership, formatting, Clippy, workspace tests and a release CLI build on pull requests and pushes to `main`. It uses Rust 1.98.0 with the committed lockfile. Tests run with one test thread so timing-sensitive concurrency checks do not compete with unrelated tests.
+
+The separate [release workflow](../.github/workflows/release.yml) builds, tests and packages each platform on tags and manual dispatch only; publishing is an owner-approved draft. See [release assets and publication](RELEASES.md).
 
 For local development commands and workspace layout, see the [project README](../README.md#development-and-contributing).

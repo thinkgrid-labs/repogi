@@ -37,6 +37,9 @@ jobs:
       - name: Validate public source manifest
         run: python3 scripts/prepare_source.py
 
+      - name: Installer regression tests
+        run: python3 scripts/release/tests/test_installers.py -v
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
