@@ -16,6 +16,20 @@ use tempfile::TempDir;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_repogi");
 
+/// Waits for the impact run's test pause, so a mid-analysis edit lands after
+/// its snapshots on runners of any speed.
+fn wait_for_pause(child: &mut std::process::Child, marker: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while !marker.exists() {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "impact exited before pausing"
+        );
+        assert!(std::time::Instant::now() < deadline, "impact never paused");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 fn git(root: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(root)
@@ -500,6 +514,7 @@ fn gitignore_change_excludes_a_file_without_calling_it_deleted() {
     assert_eq!(declarations(&report), set(&["unknown useIt src/use.ts"]));
 }
 
+#[cfg(unix)]
 #[test]
 fn symlinks_are_skipped_consistently_and_submodules_are_reported() {
     let repo = repository();
@@ -595,15 +610,18 @@ fn source_change_during_analysis_is_detected() {
     let repo = repository();
     let root = repo.path();
     modify_helper_body(root);
-    let child = Command::new(BINARY)
+    let pause = TempDir::new().unwrap();
+    let marker = pause.path().join("paused");
+    let mut child = Command::new(BINARY)
         .arg("impact")
         .arg(root)
         .args(["--format", "json", "--base", "HEAD"])
         .env("CODE_INTEL_TEST_PAUSE_AFTER_SNAPSHOTS_MS", "1500")
+        .env("CODE_INTEL_TEST_PAUSE_MARKER", &marker)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(700));
+    wait_for_pause(&mut child, &marker);
     write(
         root,
         "src/use.ts",
@@ -625,15 +643,18 @@ fn summary_cannot_claim_freshness_when_the_snapshot_changes_during_analysis() {
     let repo = repository();
     let root = repo.path();
     modify_helper_body(root);
-    let child = Command::new(BINARY)
+    let pause = TempDir::new().unwrap();
+    let marker = pause.path().join("paused");
+    let mut child = Command::new(BINARY)
         .arg("impact")
         .arg(root)
         .args(["--summary", "--format", "json", "--base", "HEAD"])
         .env("CODE_INTEL_TEST_PAUSE_AFTER_SNAPSHOTS_MS", "1500")
+        .env("CODE_INTEL_TEST_PAUSE_MARKER", &marker)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(700));
+    wait_for_pause(&mut child, &marker);
     write(
         root,
         "src/use.ts",

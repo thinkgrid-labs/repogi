@@ -346,10 +346,7 @@ fn no_repository_code_runs() {
             format!("#!/bin/sh\ntouch '{}'\n", marker(hook).display()),
         )
         .unwrap();
-        std::os::unix::fs::PermissionsExt::set_mode(
-            &mut fs::metadata(&path).unwrap().permissions(),
-            0o755,
-        );
+        #[cfg(unix)]
         fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     }
     let fsmonitor = root.join("fsmonitor.sh");
@@ -358,6 +355,7 @@ fn no_repository_code_runs() {
         format!("#!/bin/sh\ntouch '{}'\n", marker("fsmonitor").display()),
     )
     .unwrap();
+    #[cfg(unix)]
     fs::set_permissions(
         &fsmonitor,
         std::os::unix::fs::PermissionsExt::from_mode(0o755),

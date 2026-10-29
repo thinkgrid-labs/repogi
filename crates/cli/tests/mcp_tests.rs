@@ -628,6 +628,7 @@ fn unknown_coverage_and_unsupported_configuration_stay_distinct() {
 
 /// Scenario 14 and argument validation: literal, confined directories only;
 /// the same combinations are refused as in the CLI.
+#[cfg(unix)]
 #[test]
 fn test_dirs_and_evidence_paths_are_literal_confined_and_validated() {
     let (_temp, root) = repository();
@@ -1010,6 +1011,7 @@ fn discovery_over_mcp_is_read_only() {
             ),
         )
         .unwrap();
+        #[cfg(unix)]
         fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     }
     write(

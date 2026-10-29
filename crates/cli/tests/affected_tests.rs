@@ -10,6 +10,20 @@ use tempfile::TempDir;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_repogi");
 
+/// Waits for the impact run's test pause, so a mid-analysis edit lands after
+/// its snapshots on runners of any speed.
+fn wait_for_pause(child: &mut std::process::Child, marker: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while !marker.exists() {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "impact exited before pausing"
+        );
+        assert!(std::time::Instant::now() < deadline, "impact never paused");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/affected-tests")
 }
@@ -628,7 +642,9 @@ fn source_changes_during_discovery_prevent_freshness_and_completeness_claims() {
         "src/math.ts",
         "export function calc(n: number) { return n + 2; }\n",
     );
-    let child = Command::new(BINARY)
+    let pause = TempDir::new().unwrap();
+    let marker = pause.path().join("paused");
+    let mut child = Command::new(BINARY)
         .arg("impact")
         .arg(root)
         .args([
@@ -641,10 +657,11 @@ fn source_changes_during_discovery_prevent_freshness_and_completeness_claims() {
             "8000000",
         ])
         .env("CODE_INTEL_TEST_PAUSE_AFTER_SNAPSHOTS_MS", "1500")
+        .env("CODE_INTEL_TEST_PAUSE_MARKER", &marker)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(700));
+    wait_for_pause(&mut child, &marker);
     write(
         root,
         "tests/alias.test.ts",

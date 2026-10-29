@@ -695,6 +695,7 @@ fn configured_root_boundaries_and_read_only_behaviour() {
             format!("#!/bin/sh\ntouch '{}'\n", marker(hook).display()),
         )
         .unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
     }

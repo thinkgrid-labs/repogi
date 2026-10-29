@@ -2520,11 +2520,15 @@ fn compare_inner<T>(
             started.elapsed().saturating_sub(snapshots),
         ),
     ]);
-    // Test hook (sleep only): lets a test edit the working tree mid-analysis.
+    // Test hook: lets a test edit the working tree mid-analysis. The optional
+    // marker file (outside the repository) tells the test the pause has begun.
     if let Some(pause) = std::env::var("CODE_INTEL_TEST_PAUSE_AFTER_SNAPSHOTS_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
     {
+        if let Some(marker) = std::env::var_os("CODE_INTEL_TEST_PAUSE_MARKER") {
+            let _ = std::fs::write(marker, b"");
+        }
         std::thread::sleep(std::time::Duration::from_millis(pause.min(10_000)));
     }
     let base_store = Store::open_read(&base.database)?;

@@ -10,6 +10,20 @@ use std::{
 use tempfile::TempDir;
 const BINARY: &str = env!("CARGO_BIN_EXE_repogi");
 
+/// Waits for the impact run's test pause, so a mid-analysis edit lands after
+/// its snapshots on runners of any speed.
+fn wait_for_pause(child: &mut std::process::Child, marker: &Path) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    while !marker.exists() {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "impact exited before pausing"
+        );
+        assert!(std::time::Instant::now() < deadline, "impact never paused");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn git(root: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(root)
@@ -366,16 +380,19 @@ fn concurrent_source_or_index_changes_prevent_freshness_claims() {
         change(root.path());
         write(root.path(), "data.json", "{\"v\":1}\n");
         artifact(root.path(), &[]);
-        let child = Command::new(BINARY)
+        let pause = TempDir::new().unwrap();
+        let marker = pause.path().join("paused");
+        let mut child = Command::new(BINARY)
             .arg("impact")
             .arg(root.path())
             .args(["--manifest", "--format", "json"])
             .env("CODE_INTEL_TEST_PAUSE_AFTER_SNAPSHOTS_MS", "1200")
+            .env("CODE_INTEL_TEST_PAUSE_MARKER", &marker)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        thread::sleep(Duration::from_millis(500));
+        wait_for_pause(&mut child, &marker);
         if change_kind == "index" {
             git(root.path(), &["add", "src/math.ts"]);
         } else if change_kind == "json" {

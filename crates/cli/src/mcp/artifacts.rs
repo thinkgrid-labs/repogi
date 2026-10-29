@@ -423,16 +423,18 @@ mod disk {
 
         #[test]
         fn byte_limit_evicts_fifo_and_abandoned_install_is_recovered() {
-            let root = tempfile::TempDir::new().unwrap();
+            let dir = tempfile::TempDir::new().unwrap();
+            // Servers open canonical roots; temp paths can contain links (macOS /var).
+            let root = dir.path().canonicalize().unwrap();
             let a = bytes(1);
             let b = bytes(2);
             let c = bytes(3);
-            let mut cache = Cache::open(root.path(), true).unwrap();
+            let mut cache = Cache::open(&root, true).unwrap();
             cache.storage = a.len() * 2;
             cache.retain(&verify(&a).unwrap()).unwrap();
             cache.retain(&verify(&b).unwrap()).unwrap();
             std::fs::write(
-                root.path().join(".code-intel/impact/artifacts-v1/.install"),
+                root.join(".code-intel/impact/artifacts-v1/.install"),
                 "incomplete",
             )
             .unwrap();
@@ -446,7 +448,6 @@ mod disk {
             assert!(cache.list().unwrap().iter().map(|e| e.bytes).sum::<usize>() <= cache.storage);
             assert!(
                 !root
-                    .path()
                     .join(".code-intel/impact/artifacts-v1/.install")
                     .exists()
             );
@@ -454,16 +455,18 @@ mod disk {
 
         #[test]
         fn readers_are_serialized_and_temporary_symlink_is_rejected() {
-            let root = tempfile::TempDir::new().unwrap();
-            let cache = Cache::open(root.path(), true).unwrap();
+            let dir = tempfile::TempDir::new().unwrap();
+            // Servers open canonical roots; temp paths can contain links (macOS /var).
+            let root = dir.path().canonicalize().unwrap();
+            let cache = Cache::open(&root, true).unwrap();
             assert_eq!(
-                Cache::open(root.path(), true).err().unwrap().code,
+                Cache::open(&root, true).err().unwrap().code,
                 "artifact_cache_busy"
             );
             let outside = tempfile::NamedTempFile::new().unwrap();
             std::os::unix::fs::symlink(
                 outside.path(),
-                root.path().join(".code-intel/impact/artifacts-v1/.install"),
+                root.join(".code-intel/impact/artifacts-v1/.install"),
             )
             .unwrap();
             assert_eq!(
