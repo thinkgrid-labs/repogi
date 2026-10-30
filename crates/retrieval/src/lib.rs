@@ -1,6 +1,7 @@
 //! Deterministic retrieval strategies with progressive, evidence-preserving output.
 mod agent;
 pub mod impact;
+pub mod knowledge;
 mod legacy;
 pub mod manifest;
 pub mod navigate;
@@ -70,6 +71,7 @@ impl Detail {
 
 #[derive(Debug, Default)]
 pub struct Options {
+    pub scope: Scope,
     pub strategy: Strategy,
     pub detail: Detail,
     pub select: Vec<String>,
@@ -77,6 +79,34 @@ pub struct Options {
     pub skip_dependencies: bool,
     /// The caller capped the selection list; reported as `candidate_limit_reached`.
     pub selection_truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Scope {
+    #[default]
+    Code,
+    Docs,
+    Combined,
+}
+
+impl Scope {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "code" => Ok(Self::Code),
+            "docs" => Ok(Self::Docs),
+            "code,docs" | "docs,code" => Ok(Self::Combined),
+            _ => anyhow::bail!("scope must be code, docs, or code,docs"),
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Code => "code",
+            Self::Docs => "docs",
+            Self::Combined => "code,docs",
+        }
+    }
 }
 
 pub fn context(
@@ -96,6 +126,15 @@ pub fn context_with_options(
     options: &Options,
 ) -> Result<ContextResponse> {
     store.check_cancelled()?;
+    ensure!(
+        options.scope == Scope::Code
+            || matches!(options.strategy, Strategy::Optimized | Strategy::Semantic),
+        "documentation scopes require --retrieval optimized or semantic"
+    );
+    ensure!(
+        options.scope == Scope::Code || options.select.is_empty(),
+        "--select requires code scope; query document sections by keywords"
+    );
     if matches!(options.strategy, Strategy::Optimized | Strategy::Semantic) {
         optimized::context(store, query, max_tokens, format, options)
     } else {

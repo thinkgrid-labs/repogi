@@ -1,5 +1,6 @@
 //! Offline discovery, content-hash incremental indexing, and Tree-sitter extraction.
 pub mod git;
+mod markdown;
 mod semantic;
 pub mod snapshot;
 mod syntax;
@@ -116,15 +117,48 @@ fn index_with(root: &Path, database: &Path, identity: &Path, strict: bool) -> Re
             Ok(())
         },
     )?;
+    let mut documents = Vec::new();
+    let mut retained_documents = Vec::new();
+    // Impact snapshot caches remain code-only. The explicit project index owns
+    // the knowledge inventory and commits it with the code inventory below.
+    if !strict {
+        let hashes = store.document_hashes()?;
+        eligible_documents(&root, &mut report, |report, relative, source| {
+            let hash = content_hash(&source);
+            if hashes.get(&relative) == Some(&hash) {
+                report.documents.unchanged += 1;
+                retained_documents.push(relative);
+            } else {
+                match markdown::extract(&relative, source, hash) {
+                    Ok(document) => {
+                        retained_documents.push(relative);
+                        documents.push(document);
+                        report.documents.changed += 1;
+                    }
+                    Err(error) => {
+                        report.documents.skipped += 1;
+                        report.diagnostics.push(Diagnostic {
+                            path: relative,
+                            message: error.to_string(),
+                        });
+                    }
+                }
+            }
+            Ok(())
+        })?;
+    }
     let parsed = started.elapsed();
     code_intel_store::profile(&[
         ("discover_and_configs", configured),
         ("read_hash_parse", parsed.saturating_sub(configured)),
     ]);
     let applied = store
-        .apply(
-            &changed,
-            &retained,
+        .apply_with_documents(
+            (&changed, &retained),
+            (!strict).then_some(code_intel_store::DocumentUpdate {
+                changed: &documents,
+                retained: &retained_documents,
+            }),
             report,
             revision,
             &resolution,
@@ -218,6 +252,50 @@ pub fn supported_source(path: &Path) -> bool {
         path.extension().and_then(|value| value.to_str()),
         Some("ts" | "tsx")
     )
+}
+
+#[must_use]
+pub fn supported_document(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        })
+}
+
+fn eligible_documents(
+    root: &Path,
+    report: &mut IndexReport,
+    mut visit: impl FnMut(&mut IndexReport, String, String) -> Result<()>,
+) -> Result<()> {
+    for entry in discover(root, &|| Ok(()))? {
+        let path = entry.path();
+        if !supported_document(path) || entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        report.documents.scanned += 1;
+        let relative = path
+            .strip_prefix(root)
+            .context("document escaped repository root")?;
+        let Some(relative) = relative.to_str() else {
+            report.documents.skipped += 1;
+            report.diagnostics.push(Diagnostic {
+                path: relative.to_string_lossy().into(),
+                message: "non-UTF8 document path is unsupported".into(),
+            });
+            continue;
+        };
+        // Reuse precisely the code reader's path, size, text and generated-file
+        // checks, while keeping its inventory counters separate.
+        let mut reading = IndexReport::default();
+        let source = read_source(root, path, relative, &mut reading)?;
+        report.documents.skipped += reading.files_skipped;
+        report.diagnostics.extend(reading.diagnostics);
+        if let Some(source) = source {
+            visit(report, relative.into(), source)?;
+        }
+    }
+    Ok(())
 }
 
 /// Read one selected indexed source without discovery, parsing or writes.
@@ -354,6 +432,7 @@ fn discover(root: &Path, check: &dyn Fn() -> Result<()>) -> Result<Vec<ignore::D
                             | "coverage"
                             | ".next"
                             | "generated"
+                            | "target"
                     )
                 )
         });

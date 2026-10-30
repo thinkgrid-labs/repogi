@@ -3,7 +3,7 @@
 
 # Repogi — Repo Graph Intelligence
 
-**Source-backed code intelligence for AI coding agents working in TypeScript and TSX repositories.**
+**Source-backed TypeScript/TSX code intelligence and Markdown project knowledge for AI coding agents.**
 
 Repogi indexes your repository locally and answers the questions agents usually answer with rounds of grep and file reads: *where is this declared, what uses it, what depends on it, and what might this change affect?* Each answer comes with file and line evidence, and says what Repogi could not confirm.
 
@@ -33,6 +33,7 @@ Repogi is designed to cut unnecessary repository exploration while keeping depen
 | What depends on this, two or three hops out? | — | `atlas_dependencies` |
 | What might my Git change affect? | `repogi impact --base main` | `atlas_impact` (opt-in) |
 | Which tests are statically linked to this change? | `repogi impact --base HEAD --tests` | `atlas_impact` with `tests` |
+| What does the project require or record? | `repogi knowledge search "authentication requirements"` | `atlas_context` with `scope: "docs"` |
 | Is the index current? | `repogi status` | `atlas_status` |
 
 A reference answer looks like this (abridged):
@@ -80,6 +81,17 @@ echo ".code-intel/" >> .gitignore
 ```
 
 Indexing is explicit and incremental. Rerun `repogi index .` after edits: unchanged files are skipped by content hash. Queries never re-index on their own. When indexed files have changed since the last run, responses flag the evidence as stale. Git is needed only for change-impact commands.
+
+### Search project documents (unreleased knowledge foundation)
+
+Indexing also discovers eligible `.md` and `.markdown` files, including requirements, ADRs and specifications. Search returns sections with original paths, lines, freshness and truncation information:
+
+```bash
+repogi knowledge search "authentication requirements" --format json --limit 10 --max-bytes 8000
+repogi context "Implement session expiration" --scope code,docs --max-tokens 2000
+```
+
+Context remains code-only by default. Documentation is recorded project intent; keyword matches do not prove implementation or relationships to code. See [project knowledge](docs/KNOWLEDGE.md) for formats, migration, safety and limits.
 
 ### 3. Connect a coding agent
 
@@ -145,6 +157,7 @@ An MCP server answers only for the roots it was started with. With `--root` it s
 | `repogi index <path>` | Create or update the local index (JSON run report). |
 | `repogi status` | Inspect the nearest index (JSON). |
 | `repogi context <task>` | Ranked, budgeted source evidence (`--format text` or JSON). |
+| `repogi knowledge search <query>` | Ranked Markdown section evidence (`--format text` or JSON). |
 | `repogi graph [--path <file>]` | Typed static edges and unresolved sites (JSON). |
 | `repogi impact [path]` | Static impact of a Git change (text or JSON). |
 | `repogi manifest-verify <file>` | Validate a verification manifest. |
@@ -165,7 +178,7 @@ Impact analysis builds Git snapshot indexes under `.code-intel/impact/`. It does
 
 ## How Repogi works
 
-Repogi parses TypeScript/TSX with Tree-sitter, binds imports, calls, references and JSX component use through static rules, and stores files, declarations and edges in SQLite with an FTS5 search index. The CLI and MCP server read from that index.
+Repogi parses TypeScript/TSX with Tree-sitter, binds imports, calls, references and JSX component use through static rules, and stores files, declarations and edges in SQLite with an FTS5 search index. Markdown sections use separate document tables and FTS5 search; explicit context scopes combine evidence through the existing response packer. The CLI and MCP server read from that index.
 
 <div align="center">
   <img src="assets/repogi-flow.svg" alt="Repogi architecture flow: TypeScript/TSX source becomes a Tree-sitter and static-binding index, then a SQLite evidence graph, exposed via CLI and MCP for reference navigation, dependency analysis, and Git change impact." width="100%" />
@@ -202,7 +215,7 @@ TypeScript / TSX repository
 
 </details>
 
-Discovery respects `.gitignore`. It always skips `node_modules`, `.git`, `dist`, `build`, `coverage`, `.next` and `generated` directories, files over 1 MiB, and generated or minified sources. See [architecture](docs/ARCHITECTURE.md), [semantic scope](docs/SEMANTICS.md) and [module resolution](docs/MODULE_RESOLUTION.md).
+Discovery respects `.gitignore`. It always skips `node_modules`, `.git`, `dist`, `build`, `coverage`, `.next`, `target` and `generated` directories, files over 1 MiB, and generated or minified sources. See [architecture](docs/ARCHITECTURE.md), [semantic scope](docs/SEMANTICS.md) and [module resolution](docs/MODULE_RESOLUTION.md).
 
 ## Privacy and safety
 
@@ -219,6 +232,7 @@ Discovery respects `.gitignore`. It always skips `node_modules`, `.git`, `dist`,
 | **Languages** | TypeScript `.ts` and TSX `.tsx`. JavaScript, JSX, `.mts`, `.cts` and other languages are not indexed. A query with no matches says that other languages were not searched. |
 | **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. Package imports, instance dispatch and dynamic imports are not fully resolved. |
 | **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps ([details](docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md)). |
+| **Project knowledge** | Markdown only; local lexical section search. Documents record intent and do not prove code behavior. No persistent memory writes or autonomous learning. |
 | **Freshness** | Manual. Rerun `repogi index` after edits. Changed files are flagged as stale. |
 | **Static analysis** | A graph dependency is not proof that a change breaks anything. Static test links do not show that a test runs or covers the code. Runtime and HTTP consumers are not analysed. |
 | **Agent results** | Benefits depend on the task and the agent's tool use. Repogi does not guarantee token, time or cost savings, or more accurate answers, on every repository. |

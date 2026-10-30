@@ -1279,3 +1279,59 @@ fn status_reports_module_resolution_changes_as_stale() {
     cli(&root, &["index", "."]);
     assert_eq!(server.json("atlas_status", json!({}))["fresh"], true);
 }
+
+#[test]
+fn knowledge_scopes_are_read_only_bounded_and_keep_tool_names() {
+    let (_temp, root) = fixture("knowledge");
+    let before = fs::read(root.join(".code-intel/index.db")).unwrap();
+    let mut server = Server::ready(&[&root]);
+    let tools = server.request(9, "tools/list", json!({}));
+    let tools = tools["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 5);
+    let context = tools
+        .iter()
+        .find(|tool| tool["name"] == "atlas_context")
+        .unwrap();
+    assert!(context["inputSchema"]["properties"]["scope"].is_object());
+    let default = server.json("atlas_context", json!({"task":"session","max_bytes":8000}));
+    assert_eq!(
+        default,
+        server.json(
+            "atlas_context",
+            json!({"task":"session","scope":"code","max_bytes":8000})
+        )
+    );
+    for scope in ["docs", "code,docs"] {
+        let response = server.json(
+            "atlas_context",
+            json!({"task":"session","scope":scope,"max_bytes":8000}),
+        );
+        assert_eq!(response["knowledge_scope"], scope);
+        assert!(
+            response["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["kind"] == "document_section")
+        );
+        let text = server.ok(
+            "atlas_context",
+            json!({"task":"session","scope":scope,"max_bytes":2000}),
+        );
+        assert!(text.len() <= 2000);
+        assert!(text.contains("record project intent"));
+    }
+    assert_eq!(
+        server.error_code("atlas_context", json!({"task":"session","scope":"foreign"})),
+        "invalid_arguments"
+    );
+    assert_eq!(before, fs::read(root.join(".code-intel/index.db")).unwrap());
+    let db = rusqlite::Connection::open(root.join(".code-intel/index.db")).unwrap();
+    db.execute_batch("DELETE FROM metadata WHERE key='knowledge_indexed'; DROP TRIGGER document_sections_delete; DROP TABLE document_search; DROP TABLE document_sections; DROP TABLE documents; PRAGMA user_version=2;").unwrap();
+    drop(db);
+    let old = fs::read(root.join(".code-intel/index.db")).unwrap();
+    let error = server.call("atlas_context", json!({"task":"session","scope":"docs"}));
+    assert!(error.1);
+    assert!(error.0.contains("repogi index"));
+    assert_eq!(old, fs::read(root.join(".code-intel/index.db")).unwrap());
+}

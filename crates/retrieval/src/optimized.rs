@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use code_intel_core::{Budget, ContextResponse, Edge, Fact, SCHEMA_VERSION};
 use code_intel_store::Store;
 
-use crate::{Detail, Format, Options, Strategy, packing, semantic};
+use crate::{Detail, Format, Options, Scope, Strategy, packing, semantic};
 
 const LIMIT: usize = 128;
 const SEEDS: usize = 16;
@@ -41,9 +41,13 @@ pub(super) fn context(
         !terms.is_empty(),
         "task must contain at least one word or identifier"
     );
-    let (mut candidates, mut limited) = lexical(store, &terms)?;
+    let (mut candidates, mut limited) = if options.scope == Scope::Docs {
+        (BTreeMap::new(), false)
+    } else {
+        lexical(store, &terms)?
+    };
     limited |= options.selection_truncated;
-    if options.strategy == Strategy::Semantic {
+    if options.strategy == Strategy::Semantic && options.scope != Scope::Docs {
         limited |= semantic::discover(store, &terms, &mut candidates)?;
     }
     if !options.select.is_empty() {
@@ -66,7 +70,8 @@ pub(super) fn context(
         }
     }
     let mut relationships = Vec::new();
-    if !options.skip_dependencies
+    if options.scope != Scope::Docs
+        && !options.skip_dependencies
         && (options.select.is_empty() || options.detail != Detail::Detailed)
     {
         limited |= if options.strategy == Strategy::Semantic {
@@ -74,6 +79,15 @@ pub(super) fn context(
         } else {
             dependencies(store, &mut candidates, &mut relationships)?
         };
+    }
+    if options.scope != Scope::Code {
+        let (documents, cap) = crate::knowledge::candidates(store, query)?;
+        limited |= cap;
+        candidates.extend(
+            documents
+                .into_iter()
+                .map(|candidate| (candidate.fact.id.clone(), candidate)),
+        );
     }
     let total = candidates.len();
     let response = ContextResponse {
@@ -93,6 +107,12 @@ pub(super) fn context(
         detail: Some(options.detail.label().into()),
         relationships: Vec::new(),
         navigation: None,
+        knowledge_scope: (options.scope != Scope::Code).then(|| options.scope.label().into()),
+        knowledge_skipped_files: if options.scope == Scope::Code {
+            None
+        } else {
+            Some(store.document_skipped()?)
+        },
     };
     packing::pack(
         response,

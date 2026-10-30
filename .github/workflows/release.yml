@@ -1,5 +1,5 @@
 # Builds, tests and packages Repogi release binaries; publication is a separate,
-# owner-approved job. See docs/RELEASES.md for the asset contract and procedure.
+# owner-approved job. See docs/RELEASES.md for the public asset contract.
 #
 # - Runs only for version tags (v1.2.3, v1.2.3-preview.1) and manual dispatch.
 #   There is no pull_request trigger: release credentials never meet PR code.

@@ -1,6 +1,7 @@
 //! Serializable Phase 0 facts and command responses. Line ranges are inclusive, one based.
 use serde::{Deserialize, Serialize};
 
+pub mod knowledge;
 pub mod semantic;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -85,6 +86,9 @@ pub struct IndexReport {
     /// indexed ones, so every cached module was rebound without reparsing.
     #[serde(default)]
     pub resolution_changed: bool,
+    /// Markdown counters are separate from the existing code inventory.
+    #[serde(default)]
+    pub documents: knowledge::DocumentReport,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,6 +149,11 @@ pub struct Budget {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextResponse {
+    /// Present only when explicitly retrieving document intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_skipped_files: Option<usize>,
     pub schema_version: u32,
     pub query: String,
     pub index_revision: u64,

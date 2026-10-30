@@ -510,6 +510,15 @@
       ]
     },
     {
+      "name": "pulldown-cmark",
+      "version": "0.13.6",
+      "declared_license": "MIT",
+      "repository": "https://github.com/raphlinus/pulldown-cmark",
+      "license_files": [
+        "licenses/dependencies/pulldown-cmark-0.13.6/LICENSE"
+      ]
+    },
+    {
       "name": "quote",
       "version": "1.0.47",
       "declared_license": "MIT OR Apache-2.0",
@@ -762,6 +771,16 @@
       "repository": "https://github.com/tree-sitter/tree-sitter-typescript",
       "license_files": [
         "licenses/dependencies/tree-sitter-typescript-0.23.2/LICENSE"
+      ]
+    },
+    {
+      "name": "unicase",
+      "version": "2.10.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/seanmonstar/unicase",
+      "license_files": [
+        "licenses/dependencies/unicase-2.10.0/LICENSE-APACHE",
+        "licenses/dependencies/unicase-2.10.0/LICENSE-MIT"
       ]
     },
     {

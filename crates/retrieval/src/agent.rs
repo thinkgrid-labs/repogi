@@ -59,6 +59,7 @@ pub(crate) fn context(response: &ContextResponse) -> Result<String> {
     if let Some(evidence) = &response.navigation {
         output.push_str(&crate::signal::text(evidence));
     }
+    output.push_str(&crate::knowledge::context_notice(response));
     if response.items.is_empty() && response.navigation.is_some() {
         output.push_str("no indexed matches; other repository languages were not searched; use native Read/Grep\n");
     }

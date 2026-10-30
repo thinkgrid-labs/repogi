@@ -25,6 +25,7 @@ crates/cli/tests/impact.rs
 crates/cli/tests/impact_cache.rs
 crates/cli/tests/impact_git.rs
 crates/cli/tests/jsx.rs
+crates/cli/tests/knowledge.rs
 crates/cli/tests/manifest.rs
 crates/cli/tests/mcp.rs
 crates/cli/tests/mcp/efficiency_regressions.rs
@@ -39,12 +40,14 @@ crates/cli/tests/retrieval_quality.rs
 crates/cli/tests/semantic.rs
 crates/core/Cargo.toml
 crates/core/LICENSE
+crates/core/src/knowledge.rs
 crates/core/src/lib.rs
 crates/core/src/semantic.rs
 crates/index/Cargo.toml
 crates/index/LICENSE
 crates/index/src/git.rs
 crates/index/src/lib.rs
+crates/index/src/markdown.rs
 crates/index/src/semantic.rs
 crates/index/src/snapshot.rs
 crates/index/src/syntax.rs
@@ -54,6 +57,7 @@ crates/retrieval/LICENSE
 crates/retrieval/src/agent.rs
 crates/retrieval/src/impact.rs
 crates/retrieval/src/impact/summary.rs
+crates/retrieval/src/knowledge.rs
 crates/retrieval/src/legacy.rs
 crates/retrieval/src/lib.rs
 crates/retrieval/src/manifest.rs
@@ -68,9 +72,11 @@ crates/retrieval/src/tests/inventory.rs
 crates/retrieval/src/tests/output.rs
 crates/store/Cargo.toml
 crates/store/LICENSE
+crates/store/src/knowledge.rs
 crates/store/src/lib.rs
 crates/store/src/migration_1.sql
 crates/store/src/migration_2.sql
+crates/store/src/migration_3.sql
 crates/store/src/semantic.rs
 dist/README.md
 dist/binary-files.txt
@@ -86,6 +92,7 @@ docs/CI_ARTIFACT_INTEGRATION.md
 docs/DEVELOPER_PREVIEW_INSTALLATION.md
 docs/IMPACT_SUMMARIES.md
 docs/JSX_SEMANTICS.md
+docs/KNOWLEDGE.md
 docs/MANIFEST_CONSUMER_INTEROPERABILITY.md
 docs/MCP.md
 docs/MCP_IMPACT.md
@@ -229,6 +236,11 @@ fixtures/jsx/src/context.tsx
 fixtures/jsx/src/types.ts
 fixtures/jsx/src/widgets/Panel.tsx
 fixtures/jsx/tsconfig.json
+fixtures/knowledge-evaluation.json
+fixtures/knowledge/README.md
+fixtures/knowledge/docs/PRD.md
+fixtures/knowledge/docs/cache.markdown
+fixtures/knowledge/src/session.ts
 fixtures/real-world/checkgate/LICENSE
 fixtures/real-world/checkgate/NOTICE
 fixtures/real-world/checkgate/PROVENANCE.json
@@ -381,6 +393,7 @@ licenses/dependencies/pkg-config-0.3.34/LICENSE-APACHE
 licenses/dependencies/pkg-config-0.3.34/LICENSE-MIT
 licenses/dependencies/proc-macro2-1.0.107/LICENSE-APACHE
 licenses/dependencies/proc-macro2-1.0.107/LICENSE-MIT
+licenses/dependencies/pulldown-cmark-0.13.6/LICENSE
 licenses/dependencies/quote-1.0.47/LICENSE-APACHE
 licenses/dependencies/quote-1.0.47/LICENSE-MIT
 licenses/dependencies/r-efi-6.0.0/AUTHORS
@@ -429,6 +442,8 @@ licenses/dependencies/tree-sitter-0.24.7/LICENSE
 licenses/dependencies/tree-sitter-0.24.7/src/unicode/LICENSE
 licenses/dependencies/tree-sitter-language-0.1.7/LICENSE
 licenses/dependencies/tree-sitter-typescript-0.23.2/LICENSE
+licenses/dependencies/unicase-2.10.0/LICENSE-APACHE
+licenses/dependencies/unicase-2.10.0/LICENSE-MIT
 licenses/dependencies/unicode-ident-1.0.27/LICENSE-APACHE
 licenses/dependencies/unicode-ident-1.0.27/LICENSE-MIT
 licenses/dependencies/unicode-ident-1.0.27/LICENSE-UNICODE

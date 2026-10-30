@@ -16,6 +16,7 @@ pub const MAX_CHECK_FILES: usize = 32;
 enum State {
     Matched,
     Changed,
+    Missing,
     Unverified,
 }
 
@@ -33,11 +34,19 @@ impl Inspection {
             }
             store.check_cancelled()?;
             let state = if states.len() < MAX_CHECK_FILES {
-                match (root.as_deref(), store.file_hash(&path)?) {
+                let hash = if code_intel_index::supported_document(std::path::Path::new(&path))
+                    && store.knowledge_available()?
+                {
+                    store.document_hash(&path)?
+                } else {
+                    store.file_hash(&path)?
+                };
+                match (root.as_deref(), hash) {
                     (Some(root), Some(indexed)) => {
                         match code_intel_index::selected_source_hash(root, &path) {
                             Ok(Some(current)) if current == indexed => State::Matched,
-                            Ok(_) => State::Changed,
+                            Ok(None) => State::Missing,
+                            Ok(Some(_)) => State::Changed,
                             Err(_) => State::Unverified,
                         }
                     }
@@ -51,6 +60,16 @@ impl Inspection {
         Ok(Self { states })
     }
 
+    #[must_use]
+    pub fn source_state(&self, path: &str) -> &'static str {
+        match self.states.get(path) {
+            Some(State::Matched) => "matched_at_read",
+            Some(State::Changed) => "stale",
+            Some(State::Missing) => "missing",
+            _ => "unverified",
+        }
+    }
+
     pub fn project(&self, paths: impl IntoIterator<Item = String>) -> NavigationEvidence {
         let paths: BTreeSet<_> = paths.into_iter().collect();
         let mut changed = Vec::new();
@@ -59,7 +78,7 @@ impl Inspection {
         for path in paths {
             match self.states.get(&path) {
                 Some(State::Matched) => checked += 1,
-                Some(State::Changed) => {
+                Some(State::Changed | State::Missing) => {
                     checked += 1;
                     changed.push(path);
                 }
@@ -87,8 +106,13 @@ impl Inspection {
 
 #[must_use]
 pub fn text(evidence: &NavigationEvidence) -> String {
+    let scope = if evidence.supported_extensions == [".ts", ".tsx"] {
+        ".ts/.tsx only".into()
+    } else {
+        evidence.supported_extensions.join("/")
+    };
     let mut text = format!(
-        "evidence: indexed snapshot; source={} ({} checked, {} unchecked); graph freshness unverified; scope .ts/.tsx only\n",
+        "evidence: indexed snapshot; source={} ({} checked, {} unchecked); graph freshness unverified; scope {scope}\n",
         evidence.current_source, evidence.checked_files, evidence.unchecked_files
     );
     if !evidence.changed_files.is_empty() {
@@ -137,12 +161,27 @@ pub fn context(
         response.budget.max_tokens = budget;
         legacy::measure(&mut response, format)?;
         let base_bytes = response.estimated_tokens;
-        response.navigation = Some(
-            Inspection {
-                states: inspections.clone(),
+        let inspection = Inspection {
+            states: inspections.clone(),
+        };
+        for item in &mut response.items {
+            if item.kind == "document_section" {
+                item.why.push(format!(
+                    "selected source={}",
+                    inspection.source_state(&item.path)
+                ));
             }
-            .project(paths),
-        );
+        }
+        response.navigation = Some(inspection.project(paths));
+        if options.scope != crate::Scope::Code {
+            let evidence = response.navigation.as_mut().expect("attached above");
+            if options.scope == crate::Scope::Docs {
+                evidence.supported_extensions.clear();
+            }
+            evidence
+                .supported_extensions
+                .extend([".md".into(), ".markdown".into()]);
+        }
         legacy::measure(&mut response, format)?;
         if response.estimated_tokens <= budget {
             return Ok(response);

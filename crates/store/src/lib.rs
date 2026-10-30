@@ -1,5 +1,8 @@
 //! SQLite persistence, versioned schema, FTS5, and bounded graph reads.
+mod knowledge;
 mod semantic;
+
+pub use knowledge::DocumentUpdate;
 
 pub use semantic::profile;
 
@@ -19,8 +22,9 @@ use code_intel_core::{Edge, Fact, IndexReport, IndexedFile, SCHEMA_VERSION, Stat
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 const MIGRATION_1: &str = include_str!("migration_1.sql");
-const DATABASE_VERSION: u32 = 2;
+const DATABASE_VERSION: u32 = 3;
 const MIGRATION_2: &str = include_str!("migration_2.sql");
+const MIGRATION_3: &str = include_str!("migration_3.sql");
 
 /// A declaration's identity fields, without its source text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +71,22 @@ impl Store {
             version <= DATABASE_VERSION,
             "index schema {version} is newer than supported schema {DATABASE_VERSION}; use a compatible repogi binary"
         );
+        if version > 0 {
+            let stored: Option<String> = connection
+                .query_row("SELECT value FROM metadata WHERE key='root'", [], |row| {
+                    row.get(0)
+                })
+                .optional()?;
+            // Another first opener can have committed schema creation and not
+            // yet registered ownership. The atomic insert/check below handles
+            // that case; an established owner is checked before any migration.
+            ensure!(
+                stored
+                    .as_deref()
+                    .is_none_or(|stored| Some(stored) == root.to_str()),
+                "index belongs to a different repository root"
+            );
+        }
         if version < DATABASE_VERSION {
             // Write-locked, and the version re-read inside: concurrent first
             // opens of one database migrate it exactly once.
@@ -78,10 +98,13 @@ impl Store {
                 transaction.execute_batch(MIGRATION_1)?;
                 transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            if version < DATABASE_VERSION {
+            if version < 2 {
                 transaction.execute_batch(MIGRATION_2)?;
-                transaction.pragma_update(None, "user_version", DATABASE_VERSION)?;
             }
+            if version < 3 {
+                transaction.execute_batch(MIGRATION_3)?;
+            }
+            transaction.pragma_update(None, "user_version", DATABASE_VERSION)?;
             transaction.commit()?;
         }
         // Additive lookup indexes (no data change; older binaries ignore them):
@@ -461,11 +484,32 @@ impl Store {
         &mut self,
         files: &[IndexedFile],
         retained: &[String],
+        report: IndexReport,
+        expected_revision: u64,
+        resolution: &ResolutionContext,
+        resolution_fingerprint: &str,
+    ) -> Result<IndexReport> {
+        self.apply_with_documents(
+            (files, retained),
+            None,
+            report,
+            expected_revision,
+            resolution,
+            resolution_fingerprint,
+        )
+    }
+
+    /// Commit code and documentation changes under one optimistic revision lock.
+    pub fn apply_with_documents(
+        &mut self,
+        code: (&[IndexedFile], &[String]),
+        documents: Option<DocumentUpdate<'_>>,
         mut report: IndexReport,
         expected_revision: u64,
         resolution: &ResolutionContext,
         resolution_fingerprint: &str,
     ) -> Result<IndexReport> {
+        let (files, retained) = code;
         let transaction = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -534,7 +578,13 @@ impl Store {
                 transaction.execute("INSERT INTO edges(path,source_id,target_id,target_text,kind,data) VALUES(?1,?2,?3,?4,?5,?6)", params![edge.provenance.source_path,edge.source_id,edge.target_id,edge.target_text,edge.kind,serde_json::to_string(&edge)?])?;
             }
         }
-        report.index_revision = expected_revision + u64::from(rebind || expected_revision == 0);
+        let documents_changed = if let Some(documents) = documents {
+            knowledge::apply(&transaction, documents, &mut report, expected_revision + 1)?
+        } else {
+            false
+        };
+        report.index_revision =
+            expected_revision + u64::from(rebind || documents_changed || expected_revision == 0);
         report.syntax_error_files = usize::try_from(transaction.query_row(
             "SELECT count(*) FROM files WHERE syntax_error=1",
             [],

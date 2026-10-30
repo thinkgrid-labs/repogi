@@ -1,0 +1,5 @@
+[
+  {"query":"inactivity", "path":"docs/PRD.md", "heading":"Session expiration", "start_line":12, "end_line":22},
+  {"query":"validated credential", "path":"docs/PRD.md", "heading":"Authentication requirements", "start_line":9, "end_line":11},
+  {"query":"cache entries", "path":"docs/cache.markdown", "heading":"Cache", "start_line":1, "end_line":3}
+]

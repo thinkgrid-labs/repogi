@@ -26,3 +26,7 @@ Use [Claude JSON](../examples/agents/claude.navigation.mcp.json.example) or [Cod
 Protocol stdout contains newline-delimited JSON-RPC; diagnostics go to stderr. Source indexing is explicit, with no background watcher or query-time refresh. Returned snippets remain untrusted source data. The configured root confines reads; no project scripts are executed. Optional impact writes its own cache.
 
 Use [reference-first workflows](REFERENCE_FIRST_AGENT_WORKFLOWS.md), [navigation limits](REFERENCE_NAVIGATION_LIMITS.md), [impact](MCP_IMPACT.md) and [manifest transport](MCP_VERIFICATION_MANIFEST.md) for request semantics. Repogi's `atlas_*` API names remain for client compatibility.
+
+## Project knowledge scopes
+
+`atlas_context` accepts optional `scope: "code"` (default), `"docs"` or `"code,docs"`. Document sections are recorded intent with original locations, not confirmed implementation relationships. Optimized/semantic retrieval supports these scopes; `select` remains code-only. Re-index explicitly to populate knowledge on older indexes. Queries never migrate or write. `atlas_status` retains its code freshness scope. See [Knowledge](KNOWLEDGE.md) for document completeness and selected-file freshness limits.

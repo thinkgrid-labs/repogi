@@ -49,6 +49,8 @@ pub fn context(
         detail: None,
         relationships: Vec::new(),
         navigation: None,
+        knowledge_scope: None,
+        knowledge_skipped_files: None,
     };
     measure(&mut response, format)?;
     if response.estimated_tokens > max_tokens {
@@ -279,6 +281,7 @@ pub fn render(response: &ContextResponse, format: Format) -> Result<String> {
             if let Some(detail) = &response.detail {
                 writeln!(output, "Detail: {detail}")?;
             }
+            output.push_str(&crate::knowledge::context_notice(response));
             if let Some(evidence) = &response.navigation {
                 output.push_str(&crate::signal::text(evidence));
             }

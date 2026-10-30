@@ -208,6 +208,7 @@ pub fn symbol(
         .or(selector.name.as_deref())
         .unwrap_or_default();
     let options = Options {
+        scope: crate::Scope::Code,
         strategy: Strategy::Optimized,
         detail,
         select: facts.into_iter().map(|fact| fact.id).collect(),

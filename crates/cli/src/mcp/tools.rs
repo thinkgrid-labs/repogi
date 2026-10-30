@@ -441,6 +441,14 @@ impl Server {
         };
         let format = arguments.format.unwrap_or_default().into();
         let options = Options {
+            scope: arguments
+                .scope
+                .as_deref()
+                .map_or(
+                    Ok(code_intel_retrieval::Scope::Code),
+                    code_intel_retrieval::Scope::parse,
+                )
+                .map_err(|error| ToolError::from_anyhow("invalid_arguments", &error))?,
             strategy: strategy.into(),
             detail: arguments.detail.unwrap_or(DetailArg::Detailed).into(),
             select,
@@ -1169,6 +1177,7 @@ impl From<FormatArg> for Format {
 #[serde(deny_unknown_fields)]
 struct ContextArgs {
     task: String,
+    scope: Option<String>,
     detail: Option<DetailArg>,
     retrieval: Option<RetrievalArg>,
     max_bytes: Option<usize>,
@@ -1292,6 +1301,7 @@ impl Kit {
                 },
                 json!({
                     "task": {"type":"string","description":"Identifiers, name fragments or keywords."},
+                    "scope": {"type":"string","enum":["code","docs","code,docs"],"default":"code","description":"Docs are recorded intent, never confirmed code relationships. Explicitly re-index to populate Markdown."},
                     "detail": Self::detail(),
                     "retrieval": self.retrieval(),
                     "select": {"type":"array","items":{"type":"string"},"maxItems":MAX_SELECT,"description":"IDs from an earlier result."},

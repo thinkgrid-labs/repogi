@@ -48,6 +48,9 @@ enum Command {
     /// Retrieve lexical and nearby graph evidence from the persisted index.
     Context {
         task: String,
+        /// Evidence sources: code (default), docs, or code,docs.
+        #[arg(long, default_value = "code", value_parser = parse_scope)]
+        scope: code_intel_retrieval::Scope,
         /// Conservative estimate for the full rendered response, not a provider count.
         #[arg(long, default_value_t = 2000)]
         max_tokens: usize,
@@ -62,6 +65,11 @@ enum Command {
         /// Select an ID from an overview (repeatable; IDs belong to an index snapshot).
         #[arg(long)]
         select: Vec<String>,
+    },
+    /// Search source-backed Markdown project knowledge. Never executes documents.
+    Knowledge {
+        #[command(subcommand)]
+        command: KnowledgeCommand,
     },
     /// Compare two Git states and report the declarations and files that may be
     /// affected, with static evidence. Read-only: writes only its snapshot cache.
@@ -134,6 +142,23 @@ enum Command {
 enum OutputFormat {
     Json,
     Text,
+}
+
+#[derive(Subcommand)]
+enum KnowledgeCommand {
+    Search {
+        query: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+        #[arg(long, default_value_t = 8000, value_parser = clap::value_parser!(u32).range(1..=8_000_000))]
+        max_bytes: u32,
+    },
+}
+
+fn parse_scope(value: &str) -> std::result::Result<code_intel_retrieval::Scope, String> {
+    code_intel_retrieval::Scope::parse(value).map_err(|error| error.to_string())
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -288,6 +313,29 @@ fn run(cli: Cli) -> Result<String> {
             let store = open_nearest()?;
             Ok(format!("{}\n", serde_json::to_string(&store.status()?)?))
         }
+        Command::Knowledge {
+            command:
+                KnowledgeCommand::Search {
+                    query,
+                    format,
+                    limit,
+                    max_bytes,
+                },
+        } => {
+            let store = open_nearest()?;
+            let format = match format {
+                OutputFormat::Json => Format::Json,
+                OutputFormat::Text => Format::Text,
+            };
+            let response = code_intel_retrieval::knowledge::search(
+                &store,
+                &query,
+                limit,
+                max_bytes as usize,
+                format,
+            )?;
+            code_intel_retrieval::knowledge::render(&response, format)
+        }
         Command::Graph { path, limit } => {
             let store = open_nearest()?;
             let mut edges = store.semantic_edges(path.as_deref(), None, limit + 1)?;
@@ -300,6 +348,7 @@ fn run(cli: Cli) -> Result<String> {
         }
         Command::Context {
             task,
+            scope,
             max_tokens,
             format,
             retrieval,
@@ -312,6 +361,7 @@ fn run(cli: Cli) -> Result<String> {
                 OutputFormat::Text => Format::Text,
             };
             let options = Options {
+                scope,
                 strategy: match retrieval {
                     Retrieval::Lexical => Strategy::Lexical,
                     Retrieval::Graph => Strategy::Graph,
@@ -340,7 +390,12 @@ fn open_nearest() -> Result<Store> {
         validate_state_path(root)?;
         let database = root.join(".code-intel/index.db");
         if database.exists() {
-            return Store::open_read(&database);
+            let store = Store::open_read(&database)?;
+            anyhow::ensure!(
+                store.root()?.as_deref() == root.to_str(),
+                "index belongs to a different repository root; run `repogi index <path>` for this repository"
+            );
+            return Ok(store);
         }
     }
     bail!(
