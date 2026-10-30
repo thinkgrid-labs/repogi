@@ -221,7 +221,7 @@ class ShellInstallerTests(InstallerCase):
                  ('Linux', 'riscv64', 'unsupported Linux CPU architecture: riscv64'),
                  ('Linux', 'i686', 'unsupported Linux CPU architecture: i686'),
                  ('Darwin', 'ppc', 'unsupported macOS CPU architecture: ppc'),
-                 ('MINGW64_NT-10.0', 'x86_64', 'use install.ps1')]
+                 ('MINGW64_NT-10.0', 'x86_64', 'no prebuilt Windows binary yet')]
         for system, machine, message in cases:
             with self.subTest(system=system, machine=machine):
                 self.fake_platform(system, machine)

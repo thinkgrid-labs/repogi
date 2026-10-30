@@ -11,16 +11,17 @@ import re
 
 REPOSITORY = 'thinkgrid-labs/repogi'
 CHECKSUMS = 'SHA256SUMS'
-INSTALLERS = ('install.sh', 'install.ps1')
+# install.ps1 ships again with the Windows target.
+INSTALLERS = ('install.sh',)
 
 # Every published target. A target is listed here only if the release workflow
-# builds, tests and runs it on a native runner of that platform.
+# builds, tests and runs it on a native runner of that platform. Windows
+# (x86_64-pc-windows-msvc, .zip) returns once its test suite passes natively.
 TARGETS = {
     'x86_64-unknown-linux-gnu': {'os': 'linux', 'arch': 'x86_64', 'format': 'tar.gz'},
     'aarch64-unknown-linux-gnu': {'os': 'linux', 'arch': 'aarch64', 'format': 'tar.gz'},
     'x86_64-apple-darwin': {'os': 'macos', 'arch': 'x86_64', 'format': 'tar.gz'},
     'aarch64-apple-darwin': {'os': 'macos', 'arch': 'aarch64', 'format': 'tar.gz'},
-    'x86_64-pc-windows-msvc': {'os': 'windows', 'arch': 'x86_64', 'format': 'zip'},
 }
 
 # Highest glibc symbol version a Linux binary may require. The installer

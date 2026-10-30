@@ -62,7 +62,7 @@ repogi --version
 
 This installs a single `repogi` executable into Cargo's bin directory (usually `~/.cargo/bin`). To build without installing, run `cargo build --release --locked -p code-intel-cli` and use `./target/release/repogi`. Repogi is not published to crates.io.
 
-> **Prebuilt binaries:** the first GitHub Release is planned to provide archives for Linux (x86_64, ARM64), macOS and Windows, with a checksum-verifying installer, so you won't need Rust. Until that release is published, the release download URLs do not work. See [release assets and verification](docs/RELEASES.md).
+> **Prebuilt binaries:** the first GitHub Release is planned to provide archives for Linux (x86_64, ARM64) and macOS (Intel, Apple silicon), with a checksum-verifying installer, so you won't need Rust. Until that release is published, the release download URLs do not work. See [release assets and verification](docs/RELEASES.md).
 
 ### 2. Index a repository
 

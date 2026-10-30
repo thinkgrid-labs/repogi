@@ -122,9 +122,6 @@ jobs:
             os: macos-15-intel
           - target: aarch64-apple-darwin
             os: macos-15
-          - target: x86_64-pc-windows-msvc
-            os: windows-2025
-            rustflags: -C target-feature=+crt-static
     env:
       TARGET: ${{ matrix.target }}
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -241,7 +238,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15]
     defaults:
       run:
         shell: bash

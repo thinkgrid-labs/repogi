@@ -16,15 +16,16 @@ This page is the contract between the release workflow, the installers and anyon
 | `repogi-<version>-aarch64-unknown-linux-gnu.tar.gz` | Linux ARM64, glibc 2.34+ |
 | `repogi-<version>-x86_64-apple-darwin.tar.gz` | macOS Intel, 11+ |
 | `repogi-<version>-aarch64-apple-darwin.tar.gz` | macOS Apple silicon, 11+ |
-| `repogi-<version>-x86_64-pc-windows-msvc.zip` | Windows x64 |
-| `install.sh`, `install.ps1` | The installers, from the release commit |
+| `install.sh` | The installer, from the release commit |
 | `SHA256SUMS` | `sha256sum`-format digest of every other asset |
+
+Windows (`x86_64-pc-windows-msvc`, `.zip`, with `install.ps1`) is not published yet: the test suite does not pass on Windows. The packaging scripts keep zip and PE support for when it returns.
 
 Every archive holds a single top-level directory named like the archive without its extension:
 
 ```text
 repogi-<version>-<target>/
-  repogi            (repogi.exe on Windows)
+  repogi
   LICENSE
   THIRD_PARTY_NOTICES.md
   licenses/…        (dependency, SQLite and Rust standard library notices)
@@ -43,9 +44,9 @@ Nothing else may appear. `package.py` builds archives from that allowlist, and `
 | --- | --- |
 | `prepare` | The tag matches the Cargo version, and the public source manifest is valid. |
 | `notices` | `check_notices.py` walks every target's linked dependency closure and requires each package's own license grant. It also requires the SQLite notice and a Rust standard-library notice that matches the toolchain. **Any gap blocks the release.** |
-| `build` (×5, native runner per target) | Full test suite on that platform, release build, `inspect_binary.py` (format, CPU, allowed dynamic libraries, glibc floor 2.34, static Windows CRT), `smoke.py` (version, indexing, MCP stdio with exactly three Navigation tools, two-repository root isolation, no project code executed), then packaging. |
+| `build` (×4, native runner per target) | Full test suite on that platform, release build, `inspect_binary.py` (format, CPU, allowed dynamic libraries, glibc floor 2.34), `smoke.py` (version, indexing, MCP stdio with exactly three Navigation tools, two-repository root isolation, no project code executed), then packaging. |
 | `assemble` | Exactly one archive per target, member allowlist, a single source commit, `SHA256SUMS`. The checksum manifest becomes a job output that later jobs compare downloads against. |
-| `verify-install` (Ubuntu 22.04/24.04 x64 and ARM, macOS Intel/arm64, Windows) | Installer regression suite against a local mock release: platform detection, asset selection, checksum failures, HTTP errors, unsafe archives, version pinning, repeat installs, rollback, paths with spaces. On each host the real archive is installed and smoke-tested. |
+| `verify-install` (Ubuntu 22.04/24.04 x64 and ARM, macOS Intel/arm64) | Installer regression suite against a local mock release: platform detection, asset selection, checksum failures, HTTP errors, unsafe archives, version pinning, repeat installs, rollback, paths with spaces. On each host the real archive is installed and smoke-tested. |
 | `mcp-sdk` | The Linux x86_64 executable against the official MCP Python SDK. This job installs a third-party package, so it uploads nothing. |
 | `publish` | Runs only for a tag, after every job above passed, in the `release` environment. Re-verifies all assets against the `assemble` output, attests build provenance for every asset in `SHA256SUMS`, and creates a **draft** release. |
 
@@ -57,7 +58,7 @@ Nothing is published automatically. Before the first release:
 
 1. In repository settings, create the `release` environment with yourself as required reviewer, and allow only `v*` tags to deploy to it.
 2. Add a tag ruleset so that only maintainers can create `v*` tags.
-3. Resolve every problem `python3 scripts/release/check_notices.py --target <target>` reports, for all five targets.
+3. Resolve every problem `python3 scripts/release/check_notices.py --target <target>` reports, for every target.
 
 For each release:
 

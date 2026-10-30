@@ -15,7 +15,6 @@ Repogi is one self-contained executable, `repogi`. Running it needs no Rust, Car
 | Linux ARM64 | `aarch64-unknown-linux-gnu` | glibc 2.34 or newer (tested on Ubuntu 22.04 and 24.04 ARM runners) |
 | macOS Apple silicon | `aarch64-apple-darwin` | macOS 11 or newer (deployment target; tested on macOS 15 runners) |
 | macOS Intel | `x86_64-apple-darwin` | macOS 11 or newer (deployment target; tested on macOS 15 Intel runners) |
-| Windows x64 | `x86_64-pc-windows-msvc` | 64-bit Windows 10 or newer; static C runtime, so no Visual C++ redistributable (tested on Windows Server 2025 runners) |
 
 The release workflow builds each target on a GitHub-hosted runner of that platform, runs the test suite and a consumer smoke test there, and checks the executable's architecture and dynamic dependencies. On Linux it checks that no symbol needs a glibc newer than 2.34. Linux binaries are dynamically linked against glibc. They do **not** run on musl-based systems such as Alpine. Use [Build from source](#build-from-source) there, and for other CPUs or older glibc.
 
@@ -57,23 +56,7 @@ Rerunning the installer is safe. It replaces the executable with the requested v
 
 ## Windows
 
-```powershell
-irm https://github.com/thinkgrid-labs/repogi/releases/latest/download/install.ps1 | iex
-```
-
-`install.ps1` runs on Windows PowerShell 5.1 and PowerShell 7. It applies the same checks as `install.sh`: exact asset name, `SHA256SUMS` verification, zip-entry validation, and a `--version` run before replacing anything. It installs only `repogi.exe` into `%LOCALAPPDATA%\Programs\Repogi\bin`. It needs no administrator rights and does not change the execution policy. `irm | iex` runs the script text without a policy check.
-
-PATH is changed only on request. Without `-AddToPath`, the script prints the command that adds the directory to your user PATH. With `-AddToPath`, it appends the directory to the *user* PATH; machine-wide settings are never touched. Open a new terminal afterwards.
-
-To pin a version or inspect the script first:
-
-```powershell
-Invoke-WebRequest https://github.com/thinkgrid-labs/repogi/releases/latest/download/install.ps1 -OutFile install.ps1
-notepad install.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 0.1.0 -AddToPath
-```
-
-`-ExecutionPolicy Bypass` affects only that one process. Parameters: `-Version`, `-InstallDir`, `-AddToPath`, `-VerifyAttestation`; `REPOGI_VERSION`, `REPOGI_INSTALL_DIR` and `REPOGI_RELEASES_URL` work as on macOS/Linux. Windows on ARM is not a published target.
+There is no prebuilt Windows binary yet: the test suite does not pass on Windows. [Build from source](#build-from-source) instead; Windows is not yet supported. Windows binaries and `install.ps1` are planned for a later release.
 
 ## Manual download and verification
 
@@ -85,12 +68,7 @@ shasum -a 256 --check --ignore-missing SHA256SUMS       # macOS
 gh attestation verify repogi-0.1.0-aarch64-apple-darwin.tar.gz --repo thinkgrid-labs/repogi   # optional provenance
 ```
 
-```powershell
-(Get-FileHash .\repogi-0.1.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
-Select-String repogi-0.1.0-x86_64-pc-windows-msvc.zip SHA256SUMS
-```
-
-Unpack the archive and put `repogi` (`repogi.exe`) on your `PATH`. The archive also holds `LICENSE`, `THIRD_PARTY_NOTICES.md`, `licenses/` and a `BUILD-INFO.json` that records the version, target, source commit, Rust compiler and the executable's SHA-256. The macOS binaries are not notarized. A browser download may be quarantined; `xattr -d com.apple.quarantine repogi` clears that. The installer downloads with `curl`, so its copy is not quarantined.
+Unpack the archive and put `repogi` on your `PATH`. The archive also holds `LICENSE`, `THIRD_PARTY_NOTICES.md`, `licenses/` and a `BUILD-INFO.json` that records the version, target, source commit, Rust compiler and the executable's SHA-256. The macOS binaries are not notarized. A browser download may be quarantined; `xattr -d com.apple.quarantine repogi` clears that. The installer downloads with `curl`, so its copy is not quarantined.
 
 ## Build from source
 

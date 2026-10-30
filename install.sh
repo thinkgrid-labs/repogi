@@ -143,9 +143,9 @@ detect_target() {
                 *) die "unsupported macOS CPU architecture: $arch (prebuilt: arm64, x86_64)" ;;
             esac ;;
         MINGW*|MSYS*|CYGWIN*|Windows_NT)
-            die "on Windows, use install.ps1 from PowerShell: see https://github.com/${REPOSITORY}#windows" ;;
+            die "no prebuilt Windows binary yet; build from source: https://github.com/${REPOSITORY}#build-from-source" ;;
         *)
-            die "unsupported operating system: $os (prebuilt: Linux, macOS, Windows). Build from source instead: https://github.com/${REPOSITORY}#build-from-source" ;;
+            die "unsupported operating system: $os (prebuilt: Linux, macOS). Build from source instead: https://github.com/${REPOSITORY}#build-from-source" ;;
     esac
 }
 
