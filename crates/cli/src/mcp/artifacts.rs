@@ -107,6 +107,12 @@ fn expired() -> Error {
         "artifact is unavailable in this root; prepare a new manifest explicitly",
     )
 }
+fn busy() -> Error {
+    Error::new(
+        "artifact_cache_busy",
+        "artifact cache is busy; retry the request",
+    )
+}
 fn rejected() -> Error {
     Error::new(
         "state_rejected",
@@ -123,7 +129,7 @@ fn corrupt() -> Error {
 #[cfg(unix)]
 mod disk {
     use super::{
-        Error, MAX_ENTRIES, MAX_STORAGE, Path, Result, Verified, corrupt, expired, rejected,
+        MAX_ENTRIES, MAX_STORAGE, Path, Result, Verified, busy, corrupt, expired, rejected,
         valid_id,
     };
     use crate::manifest_artifact::{digest, verify};
@@ -213,20 +219,20 @@ mod disk {
                 } else {
                     OFlags::empty()
                 };
-            let lock = fs::openat(&dir, ".lock", flags, Mode::RUSR | Mode::WUSR).map_err(|e| {
-                if e == Errno::NOENT {
-                    expired()
-                } else {
-                    rejected()
+            // macOS can fail an O_CREAT open with ENOENT while another process
+            // creates the same file; that is contention, not a missing artifact.
+            let mut attempts = 0;
+            let lock = loop {
+                match fs::openat(&dir, ".lock", flags, Mode::RUSR | Mode::WUSR) {
+                    Ok(lock) => break lock,
+                    Err(Errno::NOENT) if create && attempts < 3 => attempts += 1,
+                    Err(Errno::NOENT) if create => return Err(busy()),
+                    Err(Errno::NOENT) => return Err(expired()),
+                    Err(_) => return Err(rejected()),
                 }
-            })?;
+            };
             regular(&lock)?;
-            fs::flock(&lock, FlockOperation::NonBlockingLockExclusive).map_err(|_| {
-                Error::new(
-                    "artifact_cache_busy",
-                    "artifact cache is busy; retry the request",
-                )
-            })?;
+            fs::flock(&lock, FlockOperation::NonBlockingLockExclusive).map_err(|_| busy())?;
             let cache = Self {
                 dir,
                 _lock: lock,
