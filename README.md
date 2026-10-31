@@ -7,7 +7,7 @@
 
 Repogi is a Rust CLI and Model Context Protocol (MCP) server. It indexes TypeScript/TSX code and Markdown project knowledge on your machine and answers the questions agents usually work out with rounds of grep and file reads: *where is this declared, what uses it, what does the project require, and what might this change affect?* Each answer cites files and lines and says what Repogi could not confirm.
 
-[Quick start](#quick-start) · [What it can do](#what-repogi-can-do) · [How it works](#how-repogi-works) · [Connect an agent](#connect-a-coding-agent) · [Limitations](#limitations)
+[Quick start](#quick-start) · [What it can do](#what-repogi-can-do) · [How it works](#how-repogi-works) · [Connect an agent](#connect-a-coding-agent) · [Limitations](#limitations) · [Roadmap](ROADMAP.md)
 
 </div>
 
@@ -304,6 +304,10 @@ No. Repogi makes no network calls. Content it returns to a connected agent is ha
 Nothing. Memories live in `.repogi/memory.db`. Without an index they still read, with evidence reported as `unverified`. After `repogi index .`, their evidence is re-verified against the new index.
 
 </details>
+
+## Roadmap
+
+Next come the 0.1.1 release, a reproducible evaluation with real coding agents, and language support beyond TypeScript, starting with JavaScript. The [public roadmap](ROADMAP.md) lists priorities, acceptance criteria, what is deliberately deferred and where contributions help most.
 
 ## Documentation and contributing
 
