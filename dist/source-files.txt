@@ -6,6 +6,7 @@ Cargo.lock
 Cargo.toml
 LICENSE
 README.md
+ROADMAP.md
 THIRD_PARTY_NOTICES.md
 assets/repogi-banner.svg
 assets/repogi-flow.svg

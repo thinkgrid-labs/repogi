@@ -12,7 +12,7 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {
     '.gitignore', '.gitattributes', 'Cargo.toml', 'Cargo.lock', 'LICENSE',
-    'README.md', 'THIRD_PARTY_NOTICES.md', 'licenses/THIRD_PARTY_NOTICES.json',
+    'README.md', 'ROADMAP.md', 'THIRD_PARTY_NOTICES.md', 'licenses/THIRD_PARTY_NOTICES.json',
     'install.sh', 'install.ps1',
 }
 PUBLIC_ROOTS = {'assets', 'crates', 'docs', 'examples', 'fixtures', 'licenses', 'dist', 'scripts'}
