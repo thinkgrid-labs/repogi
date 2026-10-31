@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use code_intel_retrieval::{Detail, Format, Options, Strategy};
+use code_intel_retrieval::{Detail, Format, Options, Strategy, investigate};
 use code_intel_store::{Store, validate_state_path};
 
 #[derive(Parser)]
@@ -70,6 +70,28 @@ enum Command {
     Knowledge {
         #[command(subcommand)]
         command: KnowledgeCommand,
+    },
+    /// Advisory, evidence-backed investigation plan for a task. Read-only: never
+    /// re-indexes, executes project code or tests, or modifies files.
+    Investigate {
+        task: String,
+        /// Exact entity ID, author ID (REQ-/ADR-) or fact ID to focus on (repeatable).
+        #[arg(long = "selector")]
+        selectors: Vec<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        /// Cap on the whole rendered output, in UTF-8 bytes (default 12000 for
+        /// text, 24000 for JSON).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=8_000_000))]
+        max_bytes: Option<u32>,
+        #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u8).range(1..=16))]
+        max_steps: u8,
+        /// Upstream static-consumer hops from each code target.
+        #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=3))]
+        depth: u8,
+        /// Evaluation control: step selection by category balance or evidence tier only.
+        #[arg(long, value_enum, default_value_t = InvestigationRanking::Balanced, hide = true)]
+        ranking: InvestigationRanking,
     },
     /// Compare two Git states and report the declarations and files that may be
     /// affected, with static evidence. Read-only: writes only its snapshot cache.
@@ -142,6 +164,12 @@ enum Command {
 enum OutputFormat {
     Json,
     Text,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum InvestigationRanking {
+    Balanced,
+    Tiered,
 }
 
 #[derive(Subcommand)]
@@ -319,6 +347,34 @@ fn run(cli: Cli) -> Result<String> {
                 matches!(format, OutputFormat::Json),
                 max_bytes.unwrap_or(default) as usize,
             )
+        }
+        Command::Investigate {
+            task,
+            selectors,
+            format,
+            max_bytes,
+            max_steps,
+            depth,
+            ranking,
+        } => {
+            let store = open_nearest()?;
+            let (format, default) = match format {
+                OutputFormat::Json => (Format::Json, 2 * investigate::DEFAULT_BYTES),
+                OutputFormat::Text => (Format::Text, investigate::DEFAULT_BYTES),
+            };
+            let request = investigate::Request {
+                task,
+                selectors,
+                depth: depth.into(),
+                max_steps: max_steps.into(),
+                max_bytes: max_bytes.map_or(default, |bytes| bytes as usize),
+                ranking: match ranking {
+                    InvestigationRanking::Balanced => investigate::Ranking::Balanced,
+                    InvestigationRanking::Tiered => investigate::Ranking::Tiered,
+                },
+            };
+            let response = investigate::investigate(&store, &request, format)?;
+            investigate::render(&response, format)
         }
         Command::Status => {
             let store = open_nearest()?;

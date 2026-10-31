@@ -96,6 +96,18 @@ pub struct Report {
     pub excluded_by_selection: BTreeMap<String, usize>,
 }
 
+/// The literal filename and `__tests__` conventions that discovery classifies.
+/// No runner configuration is evaluated, so membership stays advisory.
+pub(crate) fn convention(path: &str) -> Option<&'static str> {
+    if inventory::named_test(path) {
+        Some("test/spec filename convention")
+    } else if path.split('/').any(|part| part == "__tests__") {
+        Some("__tests__ directory convention; runner membership unverified")
+    } else {
+        None
+    }
+}
+
 pub struct Options {
     /// Literal repository-relative directories, no executable config or globs.
     pub directories: Vec<String>,

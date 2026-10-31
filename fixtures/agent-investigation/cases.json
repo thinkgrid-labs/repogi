@@ -1,0 +1,113 @@
+{
+  "notes": "Labels were written from the fixture design before scoring. Keys are explicit author IDs or <path>::<declared name>. 'relevant' items are required for recall; 'acceptable' items are reasonable but optional and do not count against precision. Anything else returned is unnecessary.",
+  "tasks": [
+    {
+      "id": "A-feature",
+      "category": "feature_change",
+      "task": "Modify session expiration",
+      "selectors": [],
+      "relevant": ["src/auth/session.ts::isSessionExpired", "src/auth/session.ts::SESSION_TIMEOUT_SECONDS", "REQ-AUTH-001", "ADR-0003", "src/auth/token.ts::refreshToken", "src/api/middleware.ts::requireSession", "src/auth/session.test.ts::expiresAfterTimeout"],
+      "acceptable": ["src/auth/session.ts::touchSession", "src/auth/service.ts::AuthenticationService.refresh", "ADR-0002", "REQ-AUTH-002", "src/auth/token.test.ts::rejectsExpiredRefresh", "src/storage/sqliteStore.ts::SessionRecord", "src/auth/token.ts::issueToken", "src/auth/token.ts::TokenRefreshError"],
+      "expected_uncertainty": ["unconfirmed_sites", "tests_not_executed", "behavior_unverified"],
+      "required_categories": ["implementation", "knowledge", "consumers", "tests"],
+      "first_category": "implementation"
+    },
+    {
+      "id": "B-bug",
+      "category": "bug_investigation",
+      "task": "Investigate token refresh failures",
+      "selectors": [],
+      "relevant": ["src/auth/token.ts::refreshToken", "src/auth/token.ts::TokenRefreshError", "REQ-AUTH-002", "src/auth/token.test.ts::rejectsExpiredRefresh", "src/auth/service.ts::AuthenticationService.refresh"],
+      "acceptable": ["src/auth/token.ts::issueToken", "src/auth/session.ts::isSessionExpired", "src/storage/sqliteStore.ts::SessionRecord", "REQ-AUTH-001", "src/api/routes.ts::handleRefresh", "ADR-0003", "src/auth/service.ts::AuthenticationService.login", "src/auth/session.ts::touchSession", "src/auth/session.ts::SESSION_TIMEOUT_SECONDS"],
+      "expected_uncertainty": ["tests_not_executed"],
+      "required_categories": ["implementation", "knowledge", "tests"],
+      "first_category": "implementation"
+    },
+    {
+      "id": "C-requirement",
+      "category": "requirement_investigation",
+      "task": "What implements REQ-AUTH-001?",
+      "selectors": [],
+      "relevant": ["REQ-AUTH-001", "src/auth/session.ts::isSessionExpired", "src/auth/session.ts::touchSession", "src/auth/session.ts::SESSION_TIMEOUT_SECONDS", "ADR-0003"],
+      "acceptable": ["REQ-AUTH-002", "src/auth/token.ts::refreshToken", "src/api/middleware.ts::requireSession", "src/auth/service.ts::AuthenticationService.refresh", "src/auth/session.test.ts::expiresAfterTimeout", "ADR-0002", "src/storage/sqliteStore.ts::SessionRecord", "src/auth/token.test.ts::rejectsExpiredRefresh"],
+      "expected_uncertainty": ["behavior_unverified"],
+      "required_categories": ["selected", "implementation", "knowledge"],
+      "first_category": "selected"
+    },
+    {
+      "id": "D-architecture",
+      "category": "architecture_investigation",
+      "task": "Why does this project use SQLite?",
+      "selectors": [],
+      "relevant": ["ADR-0001", "src/storage/sqliteStore.ts::SqliteSessionStore"],
+      "acceptable": ["src/storage/sqliteStore.ts::SessionRecord", "src/storage/sqliteStore.ts::openDatabase", "src/storage/sqliteStore.ts::SqliteSessionStore.create", "src/storage/sqliteStore.ts::SqliteSessionStore.save", "src/storage/sqliteStore.ts::SqliteSessionStore.constructor", "src/auth/service.ts::AuthenticationService", "src/auth/service.ts::AuthenticationService.constructor", "src/api/routes.ts::service", "src/auth/service.ts::AuthenticationService.login", "src/auth/service.ts::AuthenticationService.refresh"],
+      "expected_uncertainty": [],
+      "required_categories": ["knowledge", "implementation"],
+      "first_category": "knowledge"
+    },
+    {
+      "id": "E-impact",
+      "category": "impact_investigation",
+      "task": "What depends on the authentication service?",
+      "selectors": [],
+      "relevant": ["src/auth/service.ts::AuthenticationService", "src/api/routes.ts::service", "src/api/routes.ts::handleLogin", "src/api/routes.ts::handleRefresh"],
+      "acceptable": ["src/auth/service.ts::AuthenticationService.login", "src/auth/service.ts::AuthenticationService.refresh", "src/auth/service.ts::AuthenticationService.constructor", "tests/api/routes.test.ts::loginReturnsToken", "src/storage/sqliteStore.ts::SqliteSessionStore", "src/auth/login.ts::validateLogin", "src/auth/token.ts::refreshToken", "src/auth/token.ts::issueToken", "src/auth/session.ts::touchSession", "src/storage/sqliteStore.ts::SessionRecord"],
+      "expected_uncertainty": ["static_scope_only"],
+      "required_categories": ["implementation", "consumers"],
+      "first_category": "implementation"
+    },
+    {
+      "id": "F-incomplete",
+      "category": "incomplete_evidence",
+      "task": "Find the implementation of REQ-AUDIT-001",
+      "selectors": [],
+      "relevant": ["REQ-AUDIT-001"],
+      "acceptable": [],
+      "forbid_implementation": true,
+      "expected_uncertainty": ["unresolved_reference", "ambiguous_reference"],
+      "required_categories": ["selected", "uncertainty"],
+      "first_category": "selected"
+    },
+    {
+      "id": "G-tests",
+      "category": "test_investigation",
+      "task": "Identify relevant tests for session timeout",
+      "selectors": [],
+      "relevant": ["src/auth/session.test.ts::expiresAfterTimeout", "src/auth/session.ts::SESSION_TIMEOUT_SECONDS", "src/auth/session.ts::isSessionExpired"],
+      "acceptable": ["src/auth/token.test.ts::rejectsExpiredRefresh", "ADR-0002", "ADR-0003", "REQ-AUTH-001", "src/auth/token.ts::refreshToken", "src/api/middleware.ts::requireSession", "src/auth/session.ts::touchSession", "src/auth/service.ts::AuthenticationService.refresh", "src/storage/sqliteStore.ts::SessionRecord"],
+      "expected_uncertainty": ["tests_not_executed"],
+      "required_categories": ["tests", "implementation"],
+      "first_category": "implementation"
+    }
+  ],
+  "validated_links": [
+    ["REQ-AUTH-001", "file:src/auth/session.ts"],
+    ["REQ-AUTH-002", "file:src/auth/token.ts"],
+    ["REQ-AUTH-002", "REQ-AUTH-001"],
+    ["REQ-AUTH-003", "file:src/auth/login.ts"],
+    ["ADR-0001", "file:src/storage/sqliteStore.ts"],
+    ["ADR-0003", "ADR-0002"],
+    ["ADR-0003", "REQ-AUTH-001"],
+    ["ADR-0003", "file:src/auth/session.ts"]
+  ],
+  "forbidden_confirmed": [
+    ["src/legacy/cleanup.ts::purgeExpired", "isSessionExpired"],
+    ["REQ-AUDIT-001", "*"],
+    ["docs/notes/session-notes.md", "*"]
+  ],
+  "static_edges": [
+    ["isSessionExpired", "SESSION_TIMEOUT_SECONDS"], ["isSessionExpired", "SessionRecord"], ["touchSession", "SessionRecord"],
+    ["refreshToken", "isSessionExpired"], ["refreshToken", "TokenRefreshError"], ["refreshToken", "issueToken"], ["refreshToken", "SessionRecord"],
+    ["requireSession", "isSessionExpired"], ["requireSession", "SessionRecord"],
+    ["expiresAfterTimeout", "isSessionExpired"], ["rejectsExpiredRefresh", "refreshToken"], ["rejectsShortPassword", "validateLogin"],
+    ["validateLogin", "validateUserName"],
+    ["AuthenticationService.login", "validateLogin"], ["AuthenticationService.login", "issueToken"],
+    ["AuthenticationService.refresh", "touchSession"], ["AuthenticationService.refresh", "refreshToken"], ["AuthenticationService.refresh", "SessionRecord"],
+    ["AuthenticationService.constructor", "SqliteSessionStore"],
+    ["service", "AuthenticationService"], ["service", "openDatabase"],
+    ["handleLogin", "service"], ["handleRefresh", "service"], ["handleRefresh", "SessionRecord"],
+    ["loginReturnsToken", "handleLogin"],
+    ["openDatabase", "SqliteSessionStore"],
+    ["SqliteSessionStore.create", "SessionRecord"], ["SqliteSessionStore.save", "SessionRecord"]
+  ]
+}

@@ -67,3 +67,5 @@ All indexing and retrieval work offline after building. The added dependencies a
 ## Structured relationships (development milestone)
 
 Explicit `REQ-` headings, bounded ADR metadata and Markdown links can now be traced with `repogi knowledge trace REQ-AUTH-001`. See [knowledge relationships](KNOWLEDGE_RELATIONSHIPS.md) for conventions, schema 4 migration, exact target validation, duplicate IDs, supersession and limits. Validated targets remain documented intent, not proof of implementation. Code-only retrieval remains the default. Public release is deferred.
+
+`repogi investigate` (v0.4 development milestone) combines document matches, explicit claims and static code evidence into an ordered investigation plan. Document sections enter a plan only as lexical candidates or through explicit claims, never through keyword similarity to code. See [agent investigation](AGENT_INVESTIGATION.md).

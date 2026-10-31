@@ -2,6 +2,7 @@
 mod agent;
 mod excerpt;
 pub mod impact;
+pub mod investigate;
 pub mod knowledge;
 mod legacy;
 pub mod manifest;

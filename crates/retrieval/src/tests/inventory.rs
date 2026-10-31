@@ -56,7 +56,7 @@ pub(super) fn safe_relative(path: &str) -> bool {
             .all(|part| matches!(part, Component::Normal(_)))
 }
 
-fn named_test(path: &str) -> bool {
+pub(super) fn named_test(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
     stem.rsplit_once('.')
