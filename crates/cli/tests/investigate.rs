@@ -36,7 +36,7 @@ fn fixture() -> TempDir {
 }
 
 fn store(root: &Path) -> Store {
-    Store::open_read(&root.join(".code-intel/index.db")).unwrap()
+    Store::open_read(&root.canonicalize().unwrap().join(".code-intel/index.db")).unwrap()
 }
 
 fn plan(root: &Path, request: &Request) -> Response {

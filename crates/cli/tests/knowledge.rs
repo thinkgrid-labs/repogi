@@ -56,7 +56,7 @@ fn scalar(root: &Path, sql: &str) -> i64 {
     db(root).query_row(sql, [], |row| row.get(0)).unwrap()
 }
 fn read(root: &Path) -> Store {
-    Store::open_read(&root.join(".code-intel/index.db")).unwrap()
+    Store::open_read(&root.canonicalize().unwrap().join(".code-intel/index.db")).unwrap()
 }
 
 #[test]

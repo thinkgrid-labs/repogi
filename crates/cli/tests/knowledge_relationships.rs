@@ -32,7 +32,7 @@ fn index(root: &Path) -> IndexReport {
     code_intel_index::index(root).unwrap()
 }
 fn store(root: &Path) -> Store {
-    Store::open_read(&root.join(".code-intel/index.db")).unwrap()
+    Store::open_read(&root.canonicalize().unwrap().join(".code-intel/index.db")).unwrap()
 }
 fn db(root: &Path) -> Connection {
     Connection::open(root.join(".code-intel/index.db")).unwrap()

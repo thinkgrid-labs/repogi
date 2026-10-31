@@ -389,7 +389,14 @@ fn dense_match_locations_are_bounded_without_losing_the_rare_requirement() {
     )
     .unwrap();
     run(root.path(), &["index", "."]);
-    let store = Store::open_read(&root.path().join(".code-intel/index.db")).unwrap();
+    let store = Store::open_read(
+        &root
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join(".code-intel/index.db"),
+    )
+    .unwrap();
     let hits = store
         .search_documents("\"session\"* OR \"UniqueNeedle\"*", 1)
         .unwrap();
@@ -420,7 +427,11 @@ fn dense_match_locations_are_bounded_without_losing_the_rare_requirement() {
 fn build_metadata_failure_rolls_back_code_documents_and_revision() {
     let root = fixture();
     run(root.path(), &["index", "."]);
-    let database = root.path().join(".code-intel/index.db");
+    let database = root
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(".code-intel/index.db");
     let before = {
         let store = Store::open_read(&database).unwrap();
         (

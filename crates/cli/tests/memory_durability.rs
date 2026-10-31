@@ -1591,7 +1591,8 @@ fn reads_are_read_only_and_memory_is_scoped_to_its_root() {
         "memory_root_mismatch"
     );
     // ...and cannot be rebound while the original still holds it.
-    let recorded = root.path().to_str().unwrap();
+    let recorded = root.path().canonicalize().unwrap();
+    let recorded = recorded.to_str().unwrap();
     assert_eq!(
         refused(other.path(), &["memory", "rebind", "--from", recorded]),
         "memory_store_copied"
