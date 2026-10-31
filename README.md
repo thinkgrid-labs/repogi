@@ -36,6 +36,7 @@ Repogi is designed to cut unnecessary repository exploration while keeping depen
 | What does the project require or record? | `repogi knowledge search "authentication requirements"` | `atlas_context` with `scope: "docs"` |
 | What explicitly links a requirement, decision and code? | `repogi knowledge trace REQ-AUTH-001` | `atlas_knowledge_trace` (opt-in) |
 | Where should I start investigating this task? | `repogi investigate "Modify session expiration"` | `atlas_investigate` (opt-in) |
+| What did we already decide, and is it still supported? | `repogi memory search "session storage"` | `atlas_memory` (opt-in, read-only) |
 | Is the index current? | `repogi status` | `atlas_status` |
 
 A reference answer looks like this (abridged):
@@ -103,7 +104,7 @@ repogi knowledge trace REQ-AUTH-001 --depth 2 --format json --max-bytes 8000
 repogi knowledge trace ADR-0004 --depth 3
 ```
 
-Explicit requirement headings, bounded ADR metadata and Markdown links form a separate source-backed knowledge graph. Trace shows validated targets, unresolved/ambiguous references, supersession and freshness. A documented implementation reference never proves functional correctness. Combined `--scope code,docs` context can follow explicit links; code-only remains the default. See [knowledge relationships](docs/KNOWLEDGE_RELATIONSHIPS.md). The workspace version stays unchanged; public release is deferred until the planned persistent-memory milestone is validated and publication is approved.
+Explicit requirement headings, bounded ADR metadata and Markdown links form a separate source-backed knowledge graph. Trace shows validated targets, unresolved/ambiguous references, supersession and freshness. A documented implementation reference never proves functional correctness. Combined `--scope code,docs` context can follow explicit links; code-only remains the default. See [knowledge relationships](docs/KNOWLEDGE_RELATIONSHIPS.md). The workspace version stays unchanged; public release is deferred until the combined milestones, including persistent project memory, are validated and publication is approved.
 
 ### Investigate a task (unreleased development milestone)
 
@@ -113,6 +114,19 @@ repogi investigate "What implements REQ-AUTH-001?" --format json --max-steps 4
 ```
 
 Returns an ordered, advisory plan: candidate implementation locations, governing requirements and decisions, confirmed static consumers, statically linked test candidates and unresolved findings. Every step cites indexed evidence, states its uncertainty and names a bounded next read. Evidence classes stay separate: a lexical match is never a relationship, a validated claim is not proof of behavior, and a static test link is not coverage. Repogi does not execute the task, code or tests. See [agent investigation](docs/AGENT_INVESTIGATION.md).
+
+### Keep reviewed project memory (unreleased development milestone)
+
+```sh
+repogi memory propose --type architecture_decision --title "Sessions persist in SQLite" \
+  --claim "Session records are stored in an embedded SQLite database file." --evidence ADR-0001
+repogi memory show mem-0001                                # review the claim, evidence and digest
+repogi memory approve mem-0001 --digest <digest> --reviewer alice
+repogi memory search "SQLite"                              # approved memories, with live evidence status
+repogi investigate "Why does this project use SQLite?" --include-memory
+```
+
+A memory is a developer-reviewed claim with immutable evidence snapshots and a full history. Nothing is memorized automatically: approval names the exact revision digest and a reviewer. Reads re-check the cited bytes and identities and flag `stale` or `missing` evidence without rewriting the claim. Approval is not runtime proof. See [project memory](docs/PROJECT_MEMORY.md).
 
 ### 3. Connect a coding agent
 
@@ -158,6 +172,7 @@ See the [Codex example](examples/agents/codex.navigation.config.toml.example), [
 | `atlas_status` | Index state and full freshness check. |
 | `atlas_knowledge_trace` | Explicit knowledge relationships and source citations. Opt-in via `--tools`. |
 | `atlas_investigate` | Evidence-backed investigation plan for a task. Opt-in via `--tools`. |
+| `atlas_memory` | Read-only search, get, list and history of approved project memories. Opt-in via `--tools`. |
 | `atlas_impact` | Git change impact and advisory test candidates. Opt-in via `--tools`. |
 
 Tool ids keep the earlier project name, Atlas, for compatibility with existing MCP clients.
@@ -182,7 +197,8 @@ An MCP server answers only for the roots it was started with. With `--root` it s
 | `repogi context <task>` | Ranked, budgeted source evidence (`--format text` or JSON). |
 | `repogi knowledge search <query>` | Ranked Markdown section evidence (`--format text` or JSON). |
 | `repogi knowledge trace <identifier>` | Bounded explicit requirement/ADR relationships and evidence. |
-| `repogi investigate <task>` | Advisory, evidence-backed investigation plan (`--format text` or JSON). |
+| `repogi investigate <task>` | Advisory, evidence-backed investigation plan (`--format text` or JSON; `--include-memory` adds approved memories). |
+| `repogi memory <command>` | Reviewed project memory: `list`, `show`, `history`, `search`, `verify`, `conflicts` (read-only); `propose`, `correct`, `approve`, `reject`, `supersede`, `retire` (explicit writes). |
 | `repogi graph [--path <file>]` | Typed static edges and unresolved sites (JSON). |
 | `repogi impact [path]` | Static impact of a Git change (text or JSON). |
 | `repogi manifest-verify <file>` | Validate a verification manifest. |
@@ -257,7 +273,8 @@ Discovery respects `.gitignore`. It always skips `node_modules`, `.git`, `dist`,
 | **Languages** | TypeScript `.ts` and TSX `.tsx`. JavaScript, JSX, `.mts`, `.cts` and other languages are not indexed. A query with no matches says that other languages were not searched. |
 | **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. Package imports, instance dispatch and dynamic imports are not fully resolved. |
 | **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps ([details](docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md)). |
-| **Project knowledge** | Markdown only; local lexical section search. Documents record intent and do not prove code behavior. No persistent memory writes or autonomous learning. |
+| **Project knowledge** | Markdown only; local lexical section search. Documents record intent and do not prove code behavior. No autonomous learning. |
+| **Project memory** | Explicitly proposed and reviewed claims only, stored in `.code-intel/index.db` (back it up before deleting `.code-intel`). Verification checks cited bytes and identities, not truth. Search is lexical. Reviewer names are self-reported. |
 | **Freshness** | Manual. Rerun `repogi index` after edits. Changed files are flagged as stale. |
 | **Static analysis** | A graph dependency is not proof that a change breaks anything. Static test links do not show that a test runs or covers the code. Runtime and HTTP consumers are not analysed. |
 | **Investigation** | Advisory plans from lexical discovery, one explicit-claim hop and bounded static walks. Not an autonomous agent: nothing is executed or verified, and plans are not stored. |

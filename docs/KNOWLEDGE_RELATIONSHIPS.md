@@ -135,3 +135,7 @@ python3 scripts/evaluation/knowledge_relationships.py target/release/repogi \
 The labeled fixture covers four requirement occurrences, ADR history/cycles, valid code/document links, duplicate IDs, missing symbols, malformed paths and remote references. The evaluator fails on any false validated target, incorrect source citation, extraction/status mismatch, incomplete within-depth traversal, or failed incremental checks. Unit/integration tests additionally cover valid exact symbol IDs, schema 1/2/3 upgrades, transactional failure injection, symlink/root attacks, resource limits and read-only CLI/MCP compatibility. These small fixture measurements do not establish general agent, token or runtime-correctness benefits.
 
 Knowledge entities are rebuildable source evidence, not durable memories. Future reviewed memory must retain its own approval/correction history and provenance across index rebuilds; indexing alone cannot create it.
+
+## Reviewed memory
+
+Relationships are rebuilt from documents on every index run; they are never approved knowledge. A [project memory](PROJECT_MEMORY.md) can cite a requirement, a decision or a validated relationship as backing evidence. The memory stores that evidence by value (IDs, ranges, hashes, status), so later relationship changes are reported as `relationship_status_changed`, `relationship_target_changed` or `identity_relocated` instead of silently rewriting the reviewed claim.

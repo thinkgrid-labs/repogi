@@ -302,6 +302,13 @@ fn eligible_documents(
 /// Refuse links in every component, nonregular/oversized sources and escapes.
 /// `None` means the selected source is missing; other unreadable states fail.
 pub fn selected_source_hash(root: &Path, relative: &str) -> Result<Option<String>> {
+    Ok(selected_source_bytes(root, relative)?
+        .map(|bytes| blake3::hash(&bytes).to_hex().to_string()))
+}
+
+/// The bytes of one selected source, under the same confinement as
+/// [`selected_source_hash`]. Never follows links or leaves `root`.
+pub fn selected_source_bytes(root: &Path, relative: &str) -> Result<Option<Vec<u8>>> {
     use std::path::Component;
     let path = Path::new(relative);
     ensure!(
@@ -349,7 +356,7 @@ pub fn selected_source_hash(root: &Path, relative: &str) -> Result<Option<String
         root.canonicalize()?.as_path() == root && selected.canonicalize()? == canonical,
         "selected source moved during read"
     );
-    Ok(Some(blake3::hash(&bytes).to_hex().to_string()))
+    Ok(Some(bytes))
 }
 
 /// Order-independent identity of an indexed snapshot: BLAKE3 over sorted

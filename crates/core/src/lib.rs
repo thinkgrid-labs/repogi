@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod knowledge;
+pub mod memory;
 pub mod relationships;
 pub mod semantic;
 

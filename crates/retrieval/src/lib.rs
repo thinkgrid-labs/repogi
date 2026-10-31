@@ -6,6 +6,7 @@ pub mod investigate;
 pub mod knowledge;
 mod legacy;
 pub mod manifest;
+pub mod memory;
 pub mod navigate;
 mod optimized;
 mod packing;

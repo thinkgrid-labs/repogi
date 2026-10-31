@@ -62,7 +62,7 @@ pub fn render(response: &Response, format: Format) -> Result<String> {
         let categories: Vec<String> = completeness
             .omitted_categories
             .iter()
-            .map(super::label)
+            .map(super::evidence::label)
             .collect();
         writeln!(text, "omitted categories: {}", categories.join(", "))?;
     }
@@ -90,8 +90,8 @@ pub fn render(response: &Response, format: Format) -> Result<String> {
             text,
             "\n{}. {} [{}; tier {}] {}",
             step.order,
-            super::label(&step.action),
-            super::label(&step.category),
+            super::evidence::label(&step.action),
+            super::evidence::label(&step.category),
             step.priority.tier,
             step.objective.escape_debug()
         )?;
@@ -145,7 +145,7 @@ pub fn render(response: &Response, format: Format) -> Result<String> {
             text,
             "{} {} · {}:{}-{} [{}] · {}",
             evidence.id,
-            super::label(&evidence.class),
+            super::evidence::label(&evidence.class),
             evidence.citation.path.escape_debug(),
             evidence.citation.start_line,
             evidence.citation.end_line,
@@ -195,10 +195,16 @@ fn next_text(next: &Next) -> String {
         arguments.insert("selector".into(), selector.clone().into());
     }
     if let Some(direction) = next.direction {
-        arguments.insert("direction".into(), super::label(&direction).into());
+        arguments.insert(
+            "direction".into(),
+            super::evidence::label(&direction).into(),
+        );
     }
     if let Some(depth) = next.depth {
         arguments.insert("depth".into(), depth.into());
+    }
+    if let Some(operation) = next.operation {
+        arguments.insert("operation".into(), operation.into());
     }
     format!("{} {}", next.tool, serde_json::Value::Object(arguments))
 }
