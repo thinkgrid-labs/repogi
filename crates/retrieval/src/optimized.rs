@@ -10,13 +10,17 @@ const LIMIT: usize = 128;
 const SEEDS: usize = 16;
 const MODULES: u32 = 24;
 
+#[derive(Clone)]
 pub(super) struct Candidate {
     pub fact: Fact,
     pub score: f64,
     pub why: String,
     pub forced: bool,
+    pub matches: Vec<std::ops::Range<usize>>,
+    pub truncated: bool,
 }
 
+#[allow(clippy::too_many_lines)] // Existing retrieval orchestration, with opt-in knowledge expansion.
 pub(super) fn context(
     store: &Store,
     query: &str,
@@ -64,6 +68,8 @@ pub(super) fn context(
                     fact: fact.expect("checked above"),
                     score: 200.0,
                     why: "selected ID".into(),
+                    matches: Vec::new(),
+                    truncated: false,
                     forced: true,
                 },
             );
@@ -81,13 +87,17 @@ pub(super) fn context(
         };
     }
     if options.scope != Scope::Code {
-        let (documents, cap) = crate::knowledge::candidates(store, query)?;
+        let (documents, cap) =
+            crate::knowledge::candidates(store, query, (budget / 4).clamp(128, 2000))?;
         limited |= cap;
         candidates.extend(
             documents
                 .into_iter()
                 .map(|candidate| (candidate.fact.id.clone(), candidate)),
         );
+    }
+    if options.scope == Scope::Combined {
+        limited |= crate::relationships::context_candidates(store, &mut candidates)?;
     }
     let total = candidates.len();
     let response = ContextResponse {
@@ -170,6 +180,8 @@ fn lexical(store: &Store, terms: &[String]) -> Result<(BTreeMap<String, Candidat
                 fact,
                 score: relevance,
                 why: why.into(),
+                matches: Vec::new(),
+                truncated: false,
                 forced: false,
             },
         );
@@ -308,6 +320,8 @@ fn dependencies(
                                 fact: target.clone(),
                                 score: boost,
                                 why: "graph textual dependency (heuristic)".into(),
+                                matches: Vec::new(),
+                                truncated: false,
                                 forced: false,
                             },
                         );

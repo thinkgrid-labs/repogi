@@ -1,0 +1,23 @@
+{
+  "requirements": [["REQ-AUTH-001", "docs/PRD.md", 3], ["REQ-AUTH-002", "docs/PRD.md", 25], ["REQ-DUP-001", "docs/PRD.md", 32], ["REQ-DUP-001", "docs/PRD.md", 35]],
+  "links": [
+    ["REQ-AUTH-001", "../src/session.ts", "validated", "src/session.ts"],
+    ["REQ-AUTH-001", "../src/session%20policy.ts", "validated", "src/session policy.ts"],
+    ["REQ-AUTH-001", "ADR-0004.md#ADR-0004", "validated", "docs/ADR-0004.md"],
+    ["REQ-AUTH-001", "../src/missing.ts", "unresolved", null],
+    ["REQ-AUTH-001", "#REQ-DUP-001", "ambiguous", null],
+    ["REQ-AUTH-001", "../src/session.ts#expireSession", "unresolved", null],
+    ["REQ-AUTH-001", "../../outside.ts", "invalid", null],
+    ["REQ-AUTH-001", "%2e%2e/%2e%2e/outside.ts", "invalid", null],
+    ["REQ-AUTH-001", "https://example.invalid/session.ts", "unsupported", null],
+    ["REQ-AUTH-001", "javascript:alert%281%29", "unsupported", null],
+    ["REQ-AUTH-001", "../src/%ZZ.ts", "invalid", null],
+    ["REQ-AUTH-002", "#REQ-AUTH-001", "validated", "docs/PRD.md"],
+    ["ADR-0004", "ADR-0002", "validated", "docs/ADR-0002.md"],
+    ["ADR-0004", "REQ-AUTH-001", "validated", "docs/PRD.md"],
+    ["ADR-0004", "../src/session.ts", "validated", "src/session.ts"],
+    ["ADR-0005", "ADR-404", "unresolved", null],
+    ["ADR-0010", "ADR-0011", "validated", "docs/cycle-b.md"],
+    ["ADR-0011", "ADR-0010", "validated", "docs/cycle-a.md"]
+  ]
+}

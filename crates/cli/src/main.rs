@@ -16,7 +16,7 @@ use code_intel_store::{Store, validate_state_path};
 #[command(
     name = "repogi",
     version,
-    about = "Repogi (Repo Graph Intelligence): local TypeScript/TSX evidence index and bounded task context"
+    about = "Repogi (Repo Graph Intelligence): local code and Markdown evidence with bounded task context"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -146,6 +146,17 @@ enum OutputFormat {
 
 #[derive(Subcommand)]
 enum KnowledgeCommand {
+    /// Trace explicit source declarations and validated targets; never verifies behavior.
+    Trace {
+        selector: String,
+        #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u32).range(0..=8))]
+        depth: u32,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        #[arg(long, default_value_t = 8000, value_parser = clap::value_parser!(u32).range(1..=8_000_000))]
+        max_bytes: u32,
+    },
+    /// Search indexed Markdown with relevant excerpts and original source locations.
     Search {
         query: String,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
@@ -312,6 +323,29 @@ fn run(cli: Cli) -> Result<String> {
         Command::Status => {
             let store = open_nearest()?;
             Ok(format!("{}\n", serde_json::to_string(&store.status()?)?))
+        }
+        Command::Knowledge {
+            command:
+                KnowledgeCommand::Trace {
+                    selector,
+                    depth,
+                    format,
+                    max_bytes,
+                },
+        } => {
+            let store = open_nearest()?;
+            let format = match format {
+                OutputFormat::Json => Format::Json,
+                OutputFormat::Text => Format::Text,
+            };
+            let response = code_intel_retrieval::relationships::trace(
+                &store,
+                &selector,
+                depth,
+                max_bytes as usize,
+                format,
+            )?;
+            code_intel_retrieval::relationships::render(&response, format)
         }
         Command::Knowledge {
             command:

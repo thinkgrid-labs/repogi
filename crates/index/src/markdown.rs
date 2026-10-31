@@ -8,8 +8,7 @@ pub const MAX_SECTIONS: usize = 4096;
 
 pub fn extract(path: &str, source: String, hash: String) -> Result<Document> {
     let id = format!("document:{path}");
-    let mut starts = vec![0];
-    starts.extend(source.match_indices('\n').map(|(offset, _)| offset + 1));
+    let starts = code_intel_core::knowledge::line_starts(&source);
     let mut headings = Vec::new();
     let mut heading = None;
     let mut containers = 0usize;
@@ -89,13 +88,16 @@ pub fn extract(path: &str, source: String, hash: String) -> Result<Document> {
             content: source[*start..end].to_owned(),
         });
     }
-    Ok(Document {
+    let mut document = Document {
         id,
         path: path.into(),
         hash,
         content: source,
         sections,
-    })
+        knowledge: code_intel_core::relationships::KnowledgeExtraction::default(),
+    };
+    document.knowledge = crate::relationships::extract(&document)?;
+    Ok(document)
 }
 
 #[cfg(test)]
@@ -152,6 +154,80 @@ mod tests {
                 .sections[2]
                 .id
         );
+    }
+
+    #[test]
+    fn standalone_carriage_returns_have_valid_section_ranges() {
+        let source = "# First\rbody\r## Second\rrecorded intent\r";
+        let document = extract("policy.md", source.into(), crate::content_hash(source)).unwrap();
+        assert_eq!(document.sections.len(), 2);
+        assert_eq!(
+            (
+                document.sections[0].start_line,
+                document.sections[0].end_line
+            ),
+            (1, 2)
+        );
+        assert_eq!(
+            (
+                document.sections[1].start_line,
+                document.sections[1].end_line
+            ),
+            (3, 4)
+        );
+        assert_eq!(document.sections[0].content, "# First\rbody\r");
+    }
+
+    #[test]
+    fn html_indented_code_and_unicode_preserve_source_partitions() {
+        let source = "---\ntitle: 雪\n---\n\n# Café [policy](local.md)\n\n    # indented code\n\n<script>\n# script content\n</script>\n\n<Widget prop={value}>\n# MDX-like HTML block content\n</Widget>\n\n> # quoted\n\n- # item\n\n## 雪 decisions\nIntent with `code` and a link.\n";
+        let document = extract(
+            "Unicode policy.md",
+            source.into(),
+            crate::content_hash(source),
+        )
+        .unwrap();
+        assert_eq!(
+            document
+                .sections
+                .iter()
+                .map(|s| s.heading.as_str())
+                .collect::<Vec<_>>(),
+            ["", "Café policy", "雪 decisions"]
+        );
+        assert_eq!(
+            document
+                .sections
+                .iter()
+                .map(|s| s.content.as_str())
+                .collect::<String>(),
+            source
+        );
+        for section in &document.sections {
+            assert_eq!(
+                &source[section.start_byte..section.end_byte],
+                section.content
+            );
+            assert!(section.start_line <= section.end_line);
+            assert_eq!(
+                section.start_line,
+                code_intel_core::knowledge::line_starts(source)
+                    .partition_point(|at| *at <= section.start_byte)
+            );
+        }
+    }
+
+    #[test]
+    fn hierarchy_identity_survives_line_shifts_but_changes_with_parent_heading() {
+        let source = "# Parent\ntext\n### Child\nintent\n### Child\nsecond\n";
+        let original = extract("policy.md", source.into(), crate::content_hash(source)).unwrap();
+        let shifted = format!("preamble\n\n{source}");
+        let shifted = extract("policy.md", shifted.clone(), crate::content_hash(&shifted)).unwrap();
+        assert_eq!(original.sections[1].id, shifted.sections[2].id);
+        assert_ne!(original.sections[1].id, original.sections[2].id);
+        let renamed = source.replace("Parent", "New parent");
+        let renamed = extract("policy.md", renamed.clone(), crate::content_hash(&renamed)).unwrap();
+        assert_ne!(original.sections[1].id, renamed.sections[1].id);
     }
 
     #[test]

@@ -1,0 +1,79 @@
+[
+  {
+    "query": "session expiration inactivity",
+    "documents": [
+      [
+        "docs/PRD.md",
+        "Session requirements"
+      ]
+    ],
+    "code": [
+      "src/session.ts",
+      "src/session.test.ts"
+    ],
+    "evidence": "thirty minutes of inactivity"
+  },
+  {
+    "query": "salted credential digest",
+    "documents": [
+      [
+        "docs/ADR-001.md",
+        "Decision"
+      ]
+    ],
+    "code": [
+      "src/credential.ts"
+    ],
+    "evidence": "salted credential digest"
+  },
+  {
+    "query": "session revocation revoked",
+    "documents": [
+      [
+        "docs/ARCHITECTURE.md",
+        "Session revocation"
+      ]
+    ],
+    "code": [
+      "src/session.ts"
+    ],
+    "evidence": "registry removes revoked"
+  },
+  {
+    "query": "structured audit events",
+    "documents": [
+      [
+        "docs/operations.md",
+        "Logging"
+      ]
+    ],
+    "code": [],
+    "evidence": "structured audit events"
+  },
+  {
+    "query": "encrypted volume backups",
+    "documents": [
+      [
+        "docs/operations.md",
+        "Backups"
+      ]
+    ],
+    "code": [],
+    "evidence": "encrypted volume"
+  },
+  {
+    "query": "Implement session expiration",
+    "search_query": "session expiration",
+    "documents": [
+      [
+        "docs/PRD.md",
+        "Session requirements"
+      ]
+    ],
+    "code": [
+      "src/session.ts",
+      "src/session.test.ts"
+    ],
+    "evidence": "thirty minutes of inactivity"
+  }
+]

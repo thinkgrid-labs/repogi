@@ -65,7 +65,7 @@ fn incremental_documents_do_not_rebind_code_and_deleted_search_records_are_purge
     let initial = index(root.path());
     assert_eq!(initial.documents.changed, 3);
     assert_eq!(initial.files_changed, 1);
-    assert_eq!(scalar(root.path(), "PRAGMA user_version"), 3);
+    assert_eq!(scalar(root.path(), "PRAGMA user_version"), 4);
     let graph = success(root.path(), &["graph"]);
     let cold_hits = read(root.path())
         .search_documents("\"expiration\"*", 10)
@@ -202,7 +202,7 @@ fn old_schemas_are_read_without_writes_then_migrate_without_graph_loss() {
         assert_eq!(scalar(root.path(), "PRAGMA user_version"), version);
         let facts = scalar(root.path(), "SELECT count(*) FROM facts");
         index(root.path());
-        assert_eq!(scalar(root.path(), "PRAGMA user_version"), 3);
+        assert_eq!(scalar(root.path(), "PRAGMA user_version"), 4);
         assert_eq!(scalar(root.path(), "SELECT count(*) FROM facts"), facts);
         assert!(read(root.path()).knowledge_available().unwrap());
     }

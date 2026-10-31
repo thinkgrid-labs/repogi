@@ -18,5 +18,11 @@ tree-sitter.workspace = true
 tree-sitter-typescript.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false }
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

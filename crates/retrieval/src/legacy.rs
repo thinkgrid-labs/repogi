@@ -62,6 +62,9 @@ pub fn context(
     for candidate in ranked {
         let fact = candidate.fact;
         let mut item = ContextItem {
+            snippet_truncated: None,
+            start_byte: None,
+            end_byte: None,
             id: fact.id,
             kind: fact.kind,
             path: fact.path,
@@ -289,7 +292,7 @@ pub fn render(response: &ContextResponse, format: Format) -> Result<String> {
                 write!(
                     output,
                     "\n{}:{}-{} [{}; {}; score {:.4}]\nWhy: {}\n{}\n",
-                    item.path,
+                    item.path.escape_debug(),
                     item.start_line,
                     item.end_line,
                     item.kind,
@@ -302,6 +305,13 @@ pub fn render(response: &ContextResponse, format: Format) -> Result<String> {
                         &item.snippet
                     }
                 )?;
+                if item.snippet_truncated == Some(true) {
+                    writeln!(
+                        output,
+                        "Partial document excerpt of lines {}-{}",
+                        item.provenance.start_line, item.provenance.end_line
+                    )?;
+                }
             }
             for edge in &response.relationships {
                 writeln!(

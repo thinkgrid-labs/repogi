@@ -36,7 +36,8 @@ impl Store {
                 |row| row.get::<_, String>(0),
             )
             .optional()?
-            .is_some())
+            .as_deref()
+            == Some(&code_intel_core::knowledge::DOCUMENT_IR_VERSION.to_string()))
     }
 
     pub fn document_hashes(&self) -> Result<BTreeMap<String, String>> {
@@ -65,11 +66,11 @@ impl Store {
         self.check_cancelled()?;
         ensure!(
             self.knowledge_available()?,
-            "documentation index unavailable; run `repogi index <path>` first"
+            "documentation index unavailable or extractor outdated; run `repogi index <path>` first"
         );
         ensure!(limit <= 1001, "documentation candidate limit exceeds 1001");
         let mut query = self.connection.prepare(
-            "SELECT s.data,d.path,d.content_hash,d.index_revision,bm25(document_search,0.0,1.0,4.0,1.0) FROM document_search f JOIN document_sections s ON s.id=f.id JOIN documents d ON d.path=s.path WHERE document_search MATCH ?1 ORDER BY bm25(document_search,0.0,1.0,4.0,1.0),d.path,s.start_line,s.id LIMIT ?2"
+            "SELECT s.data,d.path,d.content_hash,d.index_revision,bm25(document_search,0.0,1.0,4.0,1.0),highlight(document_search,3,char(1),char(2)) FROM document_search f JOIN document_sections s ON s.id=f.id JOIN documents d ON d.path=s.path WHERE document_search MATCH ?1 ORDER BY bm25(document_search,0.0,1.0,4.0,1.0),d.path,s.start_line,s.id LIMIT ?2"
         ).context("documentation index unavailable; run `repogi index <path>` first")?;
         query
             .query_map(params![expression, limit], |row| {
@@ -79,25 +80,80 @@ impl Store {
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, f64>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             })?
             .map(|row| {
-                let (data, path, content_hash, index_revision, relevance) = row?;
+                let (data, path, content_hash, index_revision, relevance, highlighted) = row?;
                 let section: code_intel_core::knowledge::DocumentSection =
                     serde_json::from_str(&data)?;
+                let (matches, sampled) = matched_ranges(&highlighted, &section.content)?;
                 Ok(DocumentHit {
+                    matches,
+                    match_locations_limited: sampled.then_some(true),
                     source_end_line: section.end_line,
+                    source_start_line: section.start_line,
+                    source_start_byte: section.start_byte,
+                    source_end_byte: section.end_byte,
                     section,
                     path,
                     content_hash,
                     index_revision: u64::try_from(index_revision)?,
                     relevance,
+                    match_mode: "lexical".into(),
                     freshness: "unverified".into(),
                     truncated: false,
                 })
             })
             .collect()
     }
+}
+
+/// Binary control bytes are rejected by the shared reader. Non-NUL ASCII
+/// control markers therefore cannot collide with valid indexed content.
+/// Let SQLite supply its own Unicode/diacritic/prefix matching semantics.
+fn matched_ranges(highlighted: &str, source: &str) -> Result<(Vec<std::ops::Range<usize>>, bool)> {
+    ensure!(
+        !source.contains(['\u{1}', '\u{2}']),
+        "invalid document source; re-index repository"
+    );
+    let total = highlighted.bytes().filter(|byte| *byte == 2).count();
+    let stride = total.div_ceil(2048).max(1);
+    let mut kinds = std::collections::BTreeSet::new();
+    let mut ranges = Vec::new();
+    let (mut start, mut offset, mut ordinal) = (None, 0usize, 0usize);
+    for (position, part) in highlighted.split(['\u{1}', '\u{2}']).enumerate() {
+        if position > 0 {
+            if let Some(start) = start.take() {
+                let range = start..offset;
+                let new_kind = kinds.len() < 128
+                    && kinds.insert(
+                        source[range.clone()]
+                            .chars()
+                            .take(128)
+                            .collect::<String>()
+                            .to_lowercase(),
+                    );
+                if ordinal % stride == 0 || ordinal + 1 == total || new_kind {
+                    ranges.push(range);
+                }
+                ordinal += 1;
+            } else {
+                start = Some(offset);
+            }
+        }
+        let end = offset + part.len();
+        ensure!(
+            source.get(offset..end) == Some(part),
+            "document search is inconsistent; re-index repository"
+        );
+        offset = end;
+    }
+    ensure!(
+        start.is_none() && offset == source.len(),
+        "document search is inconsistent; re-index repository"
+    );
+    Ok((ranges, stride > 1))
 }
 
 pub(super) fn apply(
@@ -117,6 +173,7 @@ pub(super) fn apply(
     for document in update.changed {
         transaction.execute("DELETE FROM documents WHERE path=?1", [&document.path])?;
         transaction.execute("INSERT INTO documents(path,id,content_hash,content,index_revision) VALUES(?1,?2,?3,?4,?5)", params![document.path,document.id,document.hash,document.content,i64::try_from(revision)?])?;
+        super::relationships::insert(transaction, document)?;
         for section in &document.sections {
             transaction.execute("INSERT INTO document_sections(id,path,start_line,end_line,data) VALUES(?1,?2,?3,?4,?5)", params![section.id,document.path,i64::try_from(section.start_line)?,i64::try_from(section.end_line)?,serde_json::to_string(section)?])?;
             transaction.execute(
@@ -131,8 +188,8 @@ pub(super) fn apply(
         }
     }
     let initialized = transaction.execute(
-        "INSERT OR IGNORE INTO metadata(key,value) VALUES('knowledge_indexed','1')",
-        [],
+        "INSERT INTO metadata(key,value) VALUES('knowledge_indexed',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE value<>excluded.value",
+        [code_intel_core::knowledge::DOCUMENT_IR_VERSION.to_string()],
     )? > 0;
     transaction.execute_batch("DROP TABLE retained_documents")?;
     Ok(initialized || !update.changed.is_empty() || report.documents.removed > 0)

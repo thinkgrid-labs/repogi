@@ -29,14 +29,15 @@ pub const ALL_TOOLS: [&str; 5] = [
     "atlas_status",
 ];
 
-/// Every tool `--tools` can select, in listing order. `atlas_impact` is opt-in:
+/// Every tool `--tools` can select. Impact and knowledge trace are opt-in:
 /// no profile lists it, so default clients see no new schema.
-pub const SELECTABLE_TOOLS: [&str; 6] = [
+pub const SELECTABLE_TOOLS: [&str; 7] = [
     "atlas_context",
     "atlas_symbol",
     "atlas_references",
     "atlas_dependencies",
     "atlas_impact",
+    "atlas_knowledge_trace",
     "atlas_status",
 ];
 
@@ -199,6 +200,9 @@ impl Server {
         if self.tools.contains(&"atlas_impact") {
             text.push_str(" atlas_impact reviews Git changes: choose summary for files, tests for verification planning, or focused evidence. Possible/lost bindings need inspection; complete never means safe.");
         }
+        if self.tools.contains(&"atlas_knowledge_trace") {
+            text.push_str(" atlas_knowledge_trace follows explicit source claims; validated target identity does not verify implementation correctness.");
+        }
         if self.tools.contains(&"atlas_references") {
             text.push_str(" atlas_references finds direct users of one declaration.");
         }
@@ -261,6 +265,7 @@ impl Server {
             "atlas_references" => self.references(arguments, register),
             "atlas_dependencies" => self.dependencies(arguments, register),
             "atlas_impact" => self.impact(arguments, register),
+            "atlas_knowledge_trace" => self.knowledge_trace(arguments, register),
             "atlas_status" => self.status(arguments, register),
             _ => return None,
         };
@@ -421,6 +426,32 @@ impl Server {
             }
         }
         Ok(())
+    }
+
+    fn knowledge_trace(&self, arguments: Value, register: &dyn Fn(Interrupt)) -> ToolResult {
+        let args: KnowledgeTraceArgs = parse(arguments)?;
+        let max_bytes = budget(args.max_bytes)?;
+        let format = match args.format.as_deref() {
+            None | Some("agent") => Format::Text,
+            Some("json") => Format::Json,
+            _ => {
+                return Err(ToolError::new(
+                    "invalid_arguments",
+                    "format must be agent or json",
+                ));
+            }
+        };
+        let (store, _) = self.open(args.root.as_deref(), register)?;
+        let response = code_intel_retrieval::relationships::trace(
+            &store,
+            &args.selector,
+            args.depth.unwrap_or(2),
+            max_bytes,
+            format,
+        )
+        .map_err(|e| ToolError::from_anyhow("knowledge_trace_failed", &e))?;
+        code_intel_retrieval::relationships::render(&response, format)
+            .map_err(|e| ToolError::from_anyhow("knowledge_trace_failed", &e))
     }
 
     fn context(&self, arguments: Value, register: &dyn Fn(Interrupt)) -> ToolResult {
@@ -1266,6 +1297,16 @@ struct ArtifactRange {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct KnowledgeTraceArgs {
+    selector: String,
+    root: Option<String>,
+    depth: Option<u32>,
+    max_bytes: Option<usize>,
+    format: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StatusArgs {
     root: Option<String>,
     check_freshness: Option<bool>,
@@ -1301,12 +1342,18 @@ impl Kit {
                 },
                 json!({
                     "task": {"type":"string","description":"Identifiers, name fragments or keywords."},
-                    "scope": {"type":"string","enum":["code","docs","code,docs"],"default":"code","description":"Docs are recorded intent, never confirmed code relationships. Explicitly re-index to populate Markdown."},
+                    "scope": {"type":"string","enum":["code","docs","code,docs"],"default":"code","description":"Docs return query-centered recorded intent, never confirmed code links. Explicitly re-index outdated extractors."},
                     "detail": Self::detail(),
                     "retrieval": self.retrieval(),
                     "select": {"type":"array","items":{"type":"string"},"maxItems":MAX_SELECT,"description":"IDs from an earlier result."},
                 }),
                 &["task"],
+            ),
+            "atlas_knowledge_trace" => (
+                "Atlas: knowledge trace",
+                "Trace explicit requirements, decisions and source links. Validated targets do not verify implementation. Read-only; requires explicit indexing.",
+                json!({"selector":{"type":"string","maxLength":1024},"depth":{"type":"integer","minimum":0,"maximum":8,"default":2}}),
+                &["selector"],
             ),
             "atlas_symbol" => (
                 "Atlas: symbol source",

@@ -325,7 +325,10 @@ fn read(root: &Path, relative: &str) -> Result<String, String> {
     if !canonical.starts_with(root) {
         return Err(format!("`{relative}` resolves outside the repository"));
     }
-    fs::read_to_string(&path).map_err(|error| format!("read `{relative}`: {error}"))
+    let bytes = crate::source::open(root, relative)
+        .and_then(crate::source::read)
+        .map_err(|error| format!("read `{relative}`: {error}"))?;
+    String::from_utf8(bytes).map_err(|error| format!("read `{relative}`: {error}"))
 }
 
 /// JSONC as TypeScript accepts it for configs: `//` and `/* */` comments and

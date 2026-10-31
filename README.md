@@ -34,6 +34,7 @@ Repogi is designed to cut unnecessary repository exploration while keeping depen
 | What might my Git change affect? | `repogi impact --base main` | `atlas_impact` (opt-in) |
 | Which tests are statically linked to this change? | `repogi impact --base HEAD --tests` | `atlas_impact` with `tests` |
 | What does the project require or record? | `repogi knowledge search "authentication requirements"` | `atlas_context` with `scope: "docs"` |
+| What explicitly links a requirement, decision and code? | `repogi knowledge trace REQ-AUTH-001` | `atlas_knowledge_trace` (opt-in) |
 | Is the index current? | `repogi status` | `atlas_status` |
 
 A reference answer looks like this (abridged):
@@ -84,14 +85,24 @@ Indexing is explicit and incremental. Rerun `repogi index .` after edits: unchan
 
 ### Search project documents (unreleased knowledge foundation)
 
-Indexing also discovers eligible `.md` and `.markdown` files, including requirements, ADRs and specifications. Search returns sections with original paths, lines, freshness and truncation information:
+Indexing also discovers eligible `.md` and `.markdown` files, including requirements, ADRs and specifications. Search returns query-centered excerpts with original paths, byte/line ranges, freshness and truncation information:
 
 ```bash
 repogi knowledge search "authentication requirements" --format json --limit 10 --max-bytes 8000
 repogi context "Implement session expiration" --scope code,docs --max-tokens 2000
+repogi context "Implement session expiration" --scope code,docs --format text
 ```
 
-Context remains code-only by default. Documentation is recorded project intent; keyword matches do not prove implementation or relationships to code. See [project knowledge](docs/KNOWLEDGE.md) for formats, migration, safety and limits.
+Context remains code-only by default. Combined scope tries to include relevant code and requirements together when they fit. Documentation is recorded project intent; keyword matches do not prove implementation or relationships to code. See [project knowledge](docs/KNOWLEDGE.md) for formats, migration, safety and limits.
+
+### Trace explicit requirements and decisions (unreleased development milestone)
+
+```bash
+repogi knowledge trace REQ-AUTH-001 --depth 2 --format json --max-bytes 8000
+repogi knowledge trace ADR-0004 --depth 3
+```
+
+Explicit requirement headings, bounded ADR metadata and Markdown links form a separate source-backed knowledge graph. Trace shows validated targets, unresolved/ambiguous references, supersession and freshness. A documented implementation reference never proves functional correctness. Combined `--scope code,docs` context can follow explicit links; code-only remains the default. See [knowledge relationships](docs/KNOWLEDGE_RELATIONSHIPS.md). The workspace version stays unchanged; public release is deferred until the planned investigation and persistent-memory milestones are validated and publication is approved.
 
 ### 3. Connect a coding agent
 
@@ -135,6 +146,7 @@ See the [Codex example](examples/agents/codex.navigation.config.toml.example), [
 | `atlas_references` | Direct static users of a declaration, with use sites. |
 | `atlas_dependencies` | Upstream consumers or downstream dependencies, by depth. |
 | `atlas_status` | Index state and full freshness check. |
+| `atlas_knowledge_trace` | Explicit knowledge relationships and source citations. Opt-in via `--tools`. |
 | `atlas_impact` | Git change impact and advisory test candidates. Opt-in via `--tools`. |
 
 Tool ids keep the earlier project name, Atlas, for compatibility with existing MCP clients.
@@ -158,6 +170,7 @@ An MCP server answers only for the roots it was started with. With `--root` it s
 | `repogi status` | Inspect the nearest index (JSON). |
 | `repogi context <task>` | Ranked, budgeted source evidence (`--format text` or JSON). |
 | `repogi knowledge search <query>` | Ranked Markdown section evidence (`--format text` or JSON). |
+| `repogi knowledge trace <identifier>` | Bounded explicit requirement/ADR relationships and evidence. |
 | `repogi graph [--path <file>]` | Typed static edges and unresolved sites (JSON). |
 | `repogi impact [path]` | Static impact of a Git change (text or JSON). |
 | `repogi manifest-verify <file>` | Validate a verification manifest. |

@@ -1,5 +1,6 @@
 //! SQLite persistence, versioned schema, FTS5, and bounded graph reads.
 mod knowledge;
+mod relationships;
 mod semantic;
 
 pub use knowledge::DocumentUpdate;
@@ -22,7 +23,8 @@ use code_intel_core::{Edge, Fact, IndexReport, IndexedFile, SCHEMA_VERSION, Stat
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 const MIGRATION_1: &str = include_str!("migration_1.sql");
-const DATABASE_VERSION: u32 = 3;
+const DATABASE_VERSION: u32 = 4;
+const MIGRATION_4: &str = include_str!("migration_4.sql");
 const MIGRATION_2: &str = include_str!("migration_2.sql");
 const MIGRATION_3: &str = include_str!("migration_3.sql");
 
@@ -59,7 +61,11 @@ impl Interrupt {
 
 impl Store {
     pub fn open_index(database: &Path, root: &Path) -> Result<Self> {
-        let mut connection = Connection::open(database).with_context(|| {
+        let mut connection = Connection::open_with_flags(
+            database,
+            OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .with_context(|| {
             format!(
                 "open index {}; check directory permissions",
                 database.display()
@@ -104,6 +110,9 @@ impl Store {
             if version < 3 {
                 transaction.execute_batch(MIGRATION_3)?;
             }
+            if version < 4 {
+                transaction.execute_batch(MIGRATION_4)?;
+            }
             transaction.pragma_update(None, "user_version", DATABASE_VERSION)?;
             transaction.commit()?;
         }
@@ -143,13 +152,16 @@ impl Store {
 
     /// A read transaction keeps revision, FTS, and graph results in one snapshot.
     pub fn open_read(database: &Path) -> Result<Self> {
-        let connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .with_context(|| {
-                format!(
-                    "open index {}; run `repogi index <path>` first",
-                    database.display()
-                )
-            })?;
+        let connection = Connection::open_with_flags(
+            database,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .with_context(|| {
+            format!(
+                "open index {}; run `repogi index <path>` first",
+                database.display()
+            )
+        })?;
         configure(&connection)?;
         let version: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         ensure!(
@@ -504,11 +516,32 @@ impl Store {
         &mut self,
         code: (&[IndexedFile], &[String]),
         documents: Option<DocumentUpdate<'_>>,
-        mut report: IndexReport,
+        report: IndexReport,
         expected_revision: u64,
         resolution: &ResolutionContext,
         resolution_fingerprint: &str,
     ) -> Result<IndexReport> {
+        self.apply_index(
+            code,
+            documents,
+            report,
+            expected_revision,
+            resolution,
+            (resolution_fingerprint, None),
+        )
+    }
+
+    /// Persist build identity in the same transaction as inventory and revision.
+    pub fn apply_index(
+        &mut self,
+        code: (&[IndexedFile], &[String]),
+        documents: Option<DocumentUpdate<'_>>,
+        mut report: IndexReport,
+        expected_revision: u64,
+        resolution: &ResolutionContext,
+        metadata: (&str, Option<&str>),
+    ) -> Result<IndexReport> {
+        let (resolution_fingerprint, build) = metadata;
         let (files, retained) = code;
         let transaction = self
             .connection
@@ -579,7 +612,10 @@ impl Store {
             }
         }
         let documents_changed = if let Some(documents) = documents {
-            knowledge::apply(&transaction, documents, &mut report, expected_revision + 1)?
+            let changed =
+                knowledge::apply(&transaction, documents, &mut report, expected_revision + 1)?;
+            relationships::resolve(&transaction, rebind || changed, expected_revision + 1)?
+                || changed
         } else {
             false
         };
@@ -602,6 +638,9 @@ impl Store {
             ],
         )?;
         transaction.execute_batch("DROP TABLE retained")?;
+        if let Some(build) = build {
+            transaction.execute("INSERT INTO metadata(key,value) VALUES('indexer_build',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [build])?;
+        }
         transaction
             .commit()
             .context("commit index update; previous index is preserved on failure")?;
@@ -863,8 +902,11 @@ fn size(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<usize> {
 /// used to seed another snapshot. The source is opened read-only.
 pub fn copy_database(source: &Path, target: &Path) -> Result<()> {
     ensure!(!target.exists(), "copy target {} exists", target.display());
-    let connection = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .with_context(|| format!("open index {}", source.display()))?;
+    let connection = Connection::open_with_flags(
+        source,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .with_context(|| format!("open index {}", source.display()))?;
     configure(&connection)?;
     let target = target.to_str().context("index path must be valid UTF-8")?;
     connection

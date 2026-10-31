@@ -1,5 +1,6 @@
 //! Deterministic retrieval strategies with progressive, evidence-preserving output.
 mod agent;
+mod excerpt;
 pub mod impact;
 pub mod knowledge;
 mod legacy;
@@ -7,6 +8,7 @@ pub mod manifest;
 pub mod navigate;
 mod optimized;
 mod packing;
+pub mod relationships;
 mod semantic;
 pub mod signal;
 pub mod tests;

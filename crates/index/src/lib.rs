@@ -1,8 +1,10 @@
 //! Offline discovery, content-hash incremental indexing, and Tree-sitter extraction.
 pub mod git;
 mod markdown;
+mod relationships;
 mod semantic;
 pub mod snapshot;
+mod source;
 mod syntax;
 mod tsconfig;
 
@@ -123,9 +125,10 @@ fn index_with(root: &Path, database: &Path, identity: &Path, strict: bool) -> Re
     // the knowledge inventory and commits it with the code inventory below.
     if !strict {
         let hashes = store.document_hashes()?;
+        let documents_current = store.knowledge_available()? && store.relationships_available()?;
         eligible_documents(&root, &mut report, |report, relative, source| {
             let hash = content_hash(&source);
-            if hashes.get(&relative) == Some(&hash) {
+            if documents_current && hashes.get(&relative) == Some(&hash) {
                 report.documents.unchanged += 1;
                 retained_documents.push(relative);
             } else {
@@ -153,7 +156,7 @@ fn index_with(root: &Path, database: &Path, identity: &Path, strict: bool) -> Re
         ("read_hash_parse", parsed.saturating_sub(configured)),
     ]);
     let applied = store
-        .apply_with_documents(
+        .apply_index(
             (&changed, &retained),
             (!strict).then_some(code_intel_store::DocumentUpdate {
                 changed: &documents,
@@ -162,12 +165,9 @@ fn index_with(root: &Path, database: &Path, identity: &Path, strict: bool) -> Re
             report,
             revision,
             &resolution,
-            &fingerprint,
+            (&fingerprint, Some(&build)),
         )
         .context("update .code-intel/index.db; the previous index is preserved on failure");
-    if applied.is_ok() {
-        store.record_build(&build)?;
-    }
     code_intel_store::profile(&[("apply_total", started.elapsed().saturating_sub(parsed))]);
     applied
 }
@@ -333,7 +333,7 @@ pub fn selected_source_hash(root: &Path, relative: &str) -> Result<Option<String
         selected_metadata.is_file() && selected_metadata.len() <= MAX_FILE_BYTES,
         "selected source is nonregular or exceeds 1 MiB"
     );
-    let file = fs::File::open(&canonical)?;
+    let file = source::open(root, relative)?;
     let metadata = file.metadata()?;
     ensure!(
         metadata.is_file() && metadata.len() <= MAX_FILE_BYTES,
@@ -470,6 +470,14 @@ fn read_source(
     relative: &str,
     report: &mut IndexReport,
 ) -> Result<Option<String>> {
+    if relative.chars().any(char::is_control) {
+        skip(
+            report,
+            relative,
+            "control characters in source paths are unsupported",
+        );
+        return Ok(None);
+    }
     if !fs::symlink_metadata(path)?.file_type().is_file() {
         skip(report, relative, "symlink or non-regular source skipped");
         return Ok(None);
@@ -485,9 +493,9 @@ fn read_source(
         );
         return Ok(None);
     }
-    let file = fs::File::open(&canonical)
+    let file = source::open(root, relative)
         .with_context(|| format!("read {relative}; fix file permissions and retry"))?;
-    if file.metadata()?.len() > MAX_FILE_BYTES {
+    if !file.metadata()?.is_file() || file.metadata()?.len() > MAX_FILE_BYTES {
         skip(report, relative, "source exceeds 1 MiB limit");
         return Ok(None);
     }

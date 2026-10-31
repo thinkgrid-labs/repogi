@@ -6,7 +6,8 @@ Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md) (prebuilt binaries,
 
 ## Using Repogi
 
-- [Project knowledge](KNOWLEDGE.md): Markdown indexing, lexical search, code/docs context, migrations and evidence limits.
+- [Knowledge relationships](KNOWLEDGE_RELATIONSHIPS.md): explicit requirements, ADRs, bounded trace queries and source-backed links (unreleased development milestone).
+- [Project knowledge](KNOWLEDGE.md): Markdown indexing, query-centered excerpts, balanced code/docs context, extractor upgrades and evidence limits.
 - [Reference-first workflows](REFERENCE_FIRST_AGENT_WORKFLOWS.md): discover declarations, inspect consumers and read current source.
 - [Navigation limits](REFERENCE_NAVIGATION_LIMITS.md): response budgets, traversal limits, freshness and uncertainty.
 - [Change impact](CHANGE_IMPACT.md) and [compact summaries](IMPACT_SUMMARIES.md): investigate Git changes and retrieve selected evidence.

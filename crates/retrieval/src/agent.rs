@@ -69,10 +69,13 @@ pub(crate) fn context(response: &ContextResponse) -> Result<String> {
         if let Some(name) = item.name.as_ref().filter(|_| item.kind != "file") {
             write!(output, "{name} · ")?;
         }
+        if item.kind == "document_section" {
+            write!(output, "{} · ", item.path.escape_debug())?;
+        }
         write!(
             output,
             "{} · L{}",
-            item.id,
+            item.id.escape_debug(),
             lines(item.start_line, item.end_line)
         )?;
         let why: Vec<&str> = item
@@ -87,15 +90,7 @@ pub(crate) fn context(response: &ContextResponse) -> Result<String> {
         if item.confidence != "syntax" {
             write!(output, " · {}", item.confidence)?;
         }
-        match item.detail.as_deref() {
-            Some("signature_preview") => output.push_str(" · signature preview"),
-            Some("source") | None if item.end_line < item.provenance.end_line => write!(
-                output,
-                " · partial of L{}",
-                lines(item.provenance.start_line, item.provenance.end_line)
-            )?,
-            _ => {}
-        }
+        output.push_str(&preview_label(item));
         output.push('\n');
         if !item.snippet.is_empty() {
             output.push_str(&item.snippet);
@@ -133,6 +128,23 @@ pub(crate) fn context(response: &ContextResponse) -> Result<String> {
         }
     }
     Ok(output)
+}
+
+fn preview_label(item: &code_intel_core::ContextItem) -> String {
+    match item.detail.as_deref() {
+        Some("signature_preview") => " · signature preview".into(),
+        Some("source") | None
+            if item.snippet_truncated == Some(true)
+                || item.start_line > item.provenance.start_line
+                || item.end_line < item.provenance.end_line =>
+        {
+            format!(
+                " · partial of L{}",
+                lines(item.provenance.start_line, item.provenance.end_line)
+            )
+        }
+        _ => String::new(),
+    }
 }
 
 struct Group<'a> {

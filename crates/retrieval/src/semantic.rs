@@ -29,6 +29,8 @@ pub fn discover(
             fact,
             score: 20.0,
             why: "normalized identifier component".into(),
+            matches: Vec::new(),
+            truncated: false,
             forced: false,
         });
     }
@@ -86,6 +88,8 @@ pub fn dependencies(
                             fact,
                             score: relevance,
                             why: format!("verified static {:?} binding", edge.kind),
+                            matches: Vec::new(),
+                            truncated: false,
                             forced: false,
                         },
                     );

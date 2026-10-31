@@ -22,7 +22,7 @@ use serde::Serialize;
 use crate::git::{Entry, Git, Revision};
 
 /// Directory names the indexer never descends into (see `discover`).
-const EXCLUDED: [&str; 8] = [
+const EXCLUDED: [&str; 9] = [
     "node_modules",
     ".git",
     ".code-intel",
@@ -31,6 +31,7 @@ const EXCLUDED: [&str; 8] = [
     "coverage",
     ".next",
     "generated",
+    "target",
 ];
 const MODULE_EXTENSIONS: [&str; 9] = ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "json"];
 /// Commit snapshots kept in the cache (most recently used first).

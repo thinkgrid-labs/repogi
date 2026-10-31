@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod knowledge;
+pub mod relationships;
 pub mod semantic;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -125,6 +126,13 @@ pub struct Freshness {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextItem {
+    /// Explicit document-excerpt completeness; omitted for code compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet_truncated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_byte: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_byte: Option<usize>,
     pub id: String,
     pub kind: String,
     pub path: String,

@@ -21,7 +21,19 @@ pub(super) fn pack(
         }
         .into());
     }
-    let mut selected: Vec<usize> = Vec::new();
+    // Code-only retrieval retains its original packing path.
+    let mut balanced;
+    let (candidates, mut selected) = if response.knowledge_scope.as_deref() == Some("code,docs") {
+        balanced = candidates.to_vec();
+        let selected = seed_scopes(&mut balanced, &response, edges, format, detail)?;
+        (balanced.as_slice(), selected)
+    } else {
+        (candidates, Vec::new())
+    };
+    if !selected.is_empty() {
+        response = build(&response, &selected, candidates, edges, detail);
+        legacy::measure(&mut response, format)?;
+    }
     loop {
         let mut best: Option<(f64, String, Vec<usize>, ContextResponse)> = None;
         for (index, candidate) in candidates.iter().enumerate() {
@@ -78,7 +90,11 @@ pub(super) fn pack(
             .expect("nonempty candidates");
         response = build(&response, &[top], candidates, edges, detail);
         legacy::measure(&mut response, format)?;
-        legacy::fit_last_item(&mut response, budget, format)?;
+        if candidates[top].fact.kind == "document_section" {
+            crate::knowledge::fit_context_item(&mut response, &candidates[top], format)?;
+        } else {
+            legacy::fit_last_item(&mut response, budget, format)?;
+        }
         if response.estimated_tokens > budget {
             response.items.clear();
         }
@@ -93,6 +109,43 @@ pub(super) fn pack(
         .into());
     }
     Ok(response)
+}
+
+/// Seed the best evidence from each scope when both fit. Keep this preference
+/// separate from confirmed relationships: it only balances response coverage.
+fn seed_scopes(
+    candidates: &mut [Candidate],
+    base: &ContextResponse,
+    edges: &[Edge],
+    format: Format,
+    detail: Detail,
+) -> Result<Vec<usize>> {
+    let best = |docs: bool| {
+        candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| (c.fact.kind == "document_section") == docs)
+            .max_by(|(_, a), (_, b)| {
+                a.score
+                    .total_cmp(&b.score)
+                    .then_with(|| b.fact.id.cmp(&a.fact.id))
+            })
+            .map(|(i, _)| i)
+    };
+    let (Some(code), Some(doc)) = (best(false), best(true)) else {
+        return Ok(Vec::new());
+    };
+    let original = candidates[doc].clone();
+    for cap in [original.fact.snippet.len(), 256, 128, 64] {
+        candidates[doc] = crate::knowledge::preview_candidate(&original, cap);
+        let mut proposal = build(base, &[code, doc], candidates, edges, detail);
+        legacy::measure(&mut proposal, format)?;
+        if proposal.estimated_tokens <= base.budget.max_tokens {
+            return Ok(vec![code, doc]);
+        }
+    }
+    candidates[doc] = original;
+    Ok(Vec::new())
 }
 
 fn covered(index: usize, selected: &[usize], candidates: &[Candidate], detail: Detail) -> bool {
@@ -157,6 +210,11 @@ fn build(
         .count();
     response.omitted_items = candidates.len() - represented;
     response.truncated = response.omitted_items > 0 || response.candidate_limit_reached;
+    response.truncated |= selected.iter().any(|index| candidates[*index].truncated);
+    response.truncated |= response
+        .items
+        .iter()
+        .any(|item| item.snippet_truncated == Some(true));
     response.relationships = if detail == Detail::Detailed {
         Vec::new()
     } else {
@@ -177,22 +235,55 @@ fn build(
 
 fn item(candidate: &Candidate, detail: Detail) -> ContextItem {
     let fact = &candidate.fact;
-    let (snippet, end_line, level) = match detail {
-        Detail::Overview => (String::new(), fact.end_line, "overview"),
+    let mut document_start_byte = fact.start_byte;
+    let (snippet, start_line, end_line, level) = match detail {
+        Detail::Overview => (String::new(), fact.start_line, fact.end_line, "overview"),
+        Detail::Focused if fact.kind == "document_section" => {
+            let range = crate::excerpt::Windows::new(&fact.snippet, &candidate.matches).range(128);
+            document_start_byte += range.start;
+            let (start, end) = crate::excerpt::positions(&fact.snippet, &range, fact.start_line);
+            (fact.snippet[range].to_owned(), start, end, "source")
+        }
         Detail::Focused => fact.signature.as_ref().map_or_else(
             || {
                 let preview = fact.snippet.lines().next().unwrap_or_default().to_owned();
-                (preview, fact.start_line, "signature_preview")
+                (
+                    preview,
+                    fact.start_line,
+                    fact.start_line,
+                    "signature_preview",
+                )
             },
-            |signature| (signature.snippet.clone(), signature.end_line, "signature"),
+            |signature| {
+                (
+                    signature.snippet.clone(),
+                    fact.start_line,
+                    signature.end_line,
+                    "signature",
+                )
+            },
         ),
-        Detail::Detailed => (fact.snippet.clone(), fact.end_line, "source"),
+        Detail::Detailed => (
+            fact.snippet.clone(),
+            fact.start_line,
+            fact.end_line,
+            "source",
+        ),
     };
     ContextItem {
+        start_byte: (fact.kind == "document_section" && detail != Detail::Overview)
+            .then_some(document_start_byte),
+        end_byte: (fact.kind == "document_section" && detail != Detail::Overview)
+            .then_some(document_start_byte + snippet.len()),
+        snippet_truncated: (fact.kind == "document_section").then_some(
+            candidate.truncated
+                || start_line > fact.provenance.start_line
+                || end_line < fact.provenance.end_line,
+        ),
         id: fact.id.clone(),
         kind: fact.kind.clone(),
         path: fact.path.clone(),
-        start_line: fact.start_line,
+        start_line,
         end_line,
         snippet,
         score: (candidate.score * 1000.0).round() / 1000.0,

@@ -30,3 +30,9 @@ Use [reference-first workflows](REFERENCE_FIRST_AGENT_WORKFLOWS.md), [navigation
 ## Project knowledge scopes
 
 `atlas_context` accepts optional `scope: "code"` (default), `"docs"` or `"code,docs"`. Document sections are recorded intent with original locations, not confirmed implementation relationships. Optimized/semantic retrieval supports these scopes; `select` remains code-only. Re-index explicitly to populate knowledge on older indexes. Queries never migrate or write. `atlas_status` retains its code freshness scope. See [Knowledge](KNOWLEDGE.md) for document completeness and selected-file freshness limits.
+
+Document context returns query-centered excerpts with original section provenance, byte/line locations and explicit `snippet_truncated` status. Combined scope attempts to preserve both relevant code and document evidence when they fit; it does not promise both under every budget. An outdated document extractor produces an explicit re-index error without altering the index. Default code-only results and all existing `atlas_*` names remain unchanged.
+
+## Opt-in knowledge relationships
+
+Add `atlas_knowledge_trace` to `--tools` to trace explicit requirement or ADR identifiers. It is absent from both default profiles. Arguments are `selector`, optional configured `root`, `depth` (0–8), `max_bytes` (256–32000) and `format` (`agent` or `json`). The tool returns source citations, target validation states, freshness and completeness. It never indexes implicitly or treats a documented implementation claim as verified behavior. See [knowledge relationships](KNOWLEDGE_RELATIONSHIPS.md).

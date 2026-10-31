@@ -42,6 +42,27 @@ pub fn expression(query: &str) -> Result<String> {
     Ok(terms.join(" OR "))
 }
 
+/// Prefer sections covering every literal term before partial-word matches.
+/// Both passes use the same read snapshot and retain a shared candidate cap.
+fn ranked_documents(store: &Store, query: &str, limit: u32) -> Result<Vec<DocumentHit>> {
+    let expression = expression(query)?;
+    let conjunction = expression.replace(" OR ", " AND ");
+    let mut hits = store.search_documents(&conjunction, limit)?;
+    for hit in &mut hits {
+        hit.match_mode = "all_terms".into();
+    }
+    if hits.len() < limit as usize && expression != conjunction {
+        let remaining = limit - u32::try_from(hits.len())?;
+        let mut partial =
+            store.search_documents(&format!("({expression}) NOT ({conjunction})"), remaining)?;
+        for hit in &mut partial {
+            hit.match_mode = "partial_terms".into();
+        }
+        hits.extend(partial);
+    }
+    Ok(hits)
+}
+
 #[derive(Debug, Serialize)]
 pub struct SearchResponse {
     pub schema_version: u32,
@@ -79,12 +100,13 @@ pub fn render(response: &SearchResponse, format: Format) -> Result<String> {
     for hit in &response.results {
         writeln!(
             output,
-            "\n{}:{}-{} [{}; snapshot r{}; BM25 {:.6}; truncated: {}]\nHeading: {}\n{}",
-            hit.path,
+            "\n{}:{}-{} [{}; snapshot r{}; {}; BM25 {:.6}; truncated: {}]\nHeading: {}\n{}",
+            hit.path.escape_debug(),
             hit.section.start_line,
             hit.section.end_line,
             hit.freshness,
             hit.index_revision,
+            hit.match_mode,
             hit.relevance,
             hit.truncated,
             hit.section.hierarchy.join(" / "),
@@ -131,7 +153,7 @@ pub fn search(
         max_bytes <= 8_000_000,
         "knowledge response budget exceeds 8000000 bytes"
     );
-    let mut hits = store.search_documents(&expression(query)?, limit + 1)?;
+    let mut hits = ranked_documents(store, query, limit + 1)?;
     let total = hits.len();
     let limited = total > limit as usize;
     hits.truncate(limit as usize);
@@ -162,16 +184,15 @@ pub fn search(
     for hit in hits {
         response.results.push(hit);
         response.omitted_sections = total - response.results.len();
-        response.truncated = limited || response.omitted_sections > 0;
+        response.truncated = limited
+            || response.omitted_sections > 0
+            || response.results.iter().any(|hit| hit.truncated);
         measure(&mut response, format)?;
         if response.used_bytes <= max_bytes {
             continue;
         }
-        // Preserve ranking. If the best section cannot fit, try a complete-line
-        // prefix of it; otherwise stop before admitting lower-ranked matches.
-        if response.results.len() == 1 {
-            fit_preview(&mut response, format)?;
-        }
+        // Preserve ranking, but spend remaining space on matching source lines.
+        fit_preview(&mut response, format)?;
         if response.used_bytes > max_bytes {
             response.results.pop();
             response.omitted_sections = total - response.results.len();
@@ -188,54 +209,96 @@ pub fn search(
 }
 
 fn fit_preview(response: &mut SearchResponse, format: Format) -> Result<()> {
-    let original = response.results[0].section.content.clone();
-    let mut boundaries: Vec<_> = original
-        .match_indices('\n')
-        .map(|(offset, _)| offset + 1)
-        .collect();
-    if boundaries.last() != Some(&original.len()) {
-        boundaries.push(original.len());
-    }
-    let (mut low, mut high, mut best) = (0, boundaries.len(), None);
+    let index = response.results.len() - 1;
+    let original = response.results[index].clone();
+    let windows = crate::excerpt::Windows::new(&original.section.content, &original.matches);
+    let (mut low, mut high, mut best) = (1, original.section.content.len() + 1, None);
     while low < high {
         let middle = low + (high - low) / 2;
-        let hit = &mut response.results[0];
-        hit.section.content = original[..boundaries[middle]].into();
-        hit.section.end_line =
-            hit.section.start_line + hit.section.content.lines().count().saturating_sub(1);
-        hit.section.end_byte = hit.section.start_byte + hit.section.content.len();
-        hit.truncated = true;
+        let range = windows.range(middle);
+        set_excerpt(&mut response.results[index], &original, &range);
         response.truncated = true;
         measure(response, format)?;
-        if response.used_bytes <= response.max_bytes {
-            best = Some(middle);
+        if !range.is_empty() && response.used_bytes <= response.max_bytes {
+            best = Some(range);
             low = middle + 1;
         } else {
             high = middle;
         }
     }
-    let hit = &mut response.results[0];
-    hit.section.content = best.map_or_else(
-        || original.clone(),
-        |index| original[..boundaries[index]].into(),
-    );
-    hit.section.end_line =
-        hit.section.start_line + hit.section.content.lines().count().saturating_sub(1);
-    hit.section.end_byte = hit.section.start_byte + hit.section.content.len();
+    if let Some(range) = best {
+        set_excerpt(&mut response.results[index], &original, &range);
+    } else {
+        response.results[index] = original;
+    }
     measure(response, format)
 }
 
-pub(super) fn candidates(store: &Store, query: &str) -> Result<(Vec<Candidate>, bool)> {
-    let mut hits = store.search_documents(&expression(query)?, 129)?;
+fn set_excerpt(hit: &mut DocumentHit, original: &DocumentHit, range: &std::ops::Range<usize>) {
+    let section = &original.section;
+    let (start_line, end_line) =
+        crate::excerpt::positions(&section.content, range, section.start_line);
+    hit.section.content = section.content[range.clone()].into();
+    hit.section.start_byte = section.start_byte + range.start;
+    hit.section.end_byte = section.start_byte + range.end;
+    hit.section.start_line = start_line;
+    hit.section.end_line = end_line;
+    hit.truncated = original.truncated || range.start > 0 || range.end < section.content.len();
+    hit.matches = original
+        .matches
+        .iter()
+        .filter(|matched| matched.start >= range.start && matched.end <= range.end)
+        .map(|matched| matched.start - range.start..matched.end - range.start)
+        .collect();
+}
+
+/// Task wording is different from literal knowledge search. Omit one leading
+/// editing verb only when content keywords remain; code ranking is untouched.
+fn task_keywords(query: &str) -> &str {
+    let query = query.trim();
+    let Some((first, rest)) = query.split_once(char::is_whitespace) else {
+        return query;
+    };
+    if ["implement", "add", "fix", "update", "refactor"]
+        .iter()
+        .any(|verb| first.eq_ignore_ascii_case(verb))
+        && !rest.trim().is_empty()
+    {
+        rest.trim()
+    } else {
+        query
+    }
+}
+
+pub(super) fn candidates(
+    store: &Store,
+    query: &str,
+    excerpt_bytes: usize,
+) -> Result<(Vec<Candidate>, bool)> {
+    let mut hits = ranked_documents(store, task_keywords(query), 129)?;
     let limited = hits.len() > 128;
     hits.truncate(128);
     let mut candidates = Vec::new();
-    for (rank, hit) in hits.into_iter().enumerate() {
+    for (rank, mut hit) in hits.into_iter().enumerate() {
+        let original = hit.clone();
+        let range =
+            crate::excerpt::Windows::new(&hit.section.content, &hit.matches).range(excerpt_bytes);
+        set_excerpt(&mut hit, &original, &range);
         let section = hit.section;
         candidates.push(Candidate {
             score: 20.0 / f64::from(u32::try_from(rank + 1)?),
-            why: format!("FTS5 lexical document match; recorded intent, implementation unverified; heading={}; snapshot=r{}", section.hierarchy.join(" / "), hit.index_revision),
+            why: format!(
+                "FTS5 document match; recorded intent; r{}{}",
+                hit.index_revision,
+                if hit.match_locations_limited == Some(true) {
+                    "; sampled match locations"
+                } else {
+                    ""
+                }
+            ),
             forced: false,
+            matches: hit.matches,
+            truncated: hit.truncated,
             fact: Fact {
                 id: section.id,
                 kind: "document_section".into(),
@@ -248,8 +311,8 @@ pub(super) fn candidates(store: &Store, query: &str) -> Result<(Vec<Candidate>, 
                 snippet: section.content,
                 provenance: Provenance {
                     source_path: hit.path,
-                    start_line: section.start_line,
-                    end_line: section.end_line,
+                    start_line: hit.source_start_line,
+                    end_line: hit.source_end_line,
                     extraction_method: "commonmark_section".into(),
                     confidence: "recorded_intent".into(),
                 },
@@ -258,4 +321,64 @@ pub(super) fn candidates(store: &Store, query: &str) -> Result<(Vec<Candidate>, 
         });
     }
     Ok((candidates, limited))
+}
+
+pub(super) fn preview_candidate(candidate: &Candidate, bytes: usize) -> Candidate {
+    let mut preview = candidate.clone();
+    let source = &candidate.fact.snippet;
+    let range = crate::excerpt::Windows::new(source, &candidate.matches).range(bytes);
+    let (start, end) = crate::excerpt::positions(source, &range, candidate.fact.start_line);
+    preview.fact.snippet = source[range.clone()].into();
+    preview.fact.start_line = start;
+    preview.fact.end_line = end;
+    preview.fact.start_byte = candidate.fact.start_byte + range.start;
+    preview.fact.end_byte = candidate.fact.start_byte + range.end;
+    preview.truncated |= range.start > 0 || range.end < source.len();
+    preview.matches = candidate
+        .matches
+        .iter()
+        .filter(|matched| matched.start >= range.start && matched.end <= range.end)
+        .map(|matched| matched.start - range.start..matched.end - range.start)
+        .collect();
+    preview
+}
+
+pub(super) fn fit_context_item(
+    response: &mut code_intel_core::ContextResponse,
+    candidate: &Candidate,
+    format: Format,
+) -> Result<()> {
+    let original = response.items.last().expect("item just pushed").clone();
+    let windows = crate::excerpt::Windows::new(&candidate.fact.snippet, &candidate.matches);
+    let (mut low, mut high, mut best) = (1, candidate.fact.snippet.len() + 1, None);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let range = windows.range(middle);
+        let item = response.items.last_mut().expect("item just pushed");
+        item.snippet = candidate.fact.snippet[range.clone()].into();
+        item.start_byte = Some(candidate.fact.start_byte + range.start);
+        item.end_byte = Some(candidate.fact.start_byte + range.end);
+        (item.start_line, item.end_line) =
+            crate::excerpt::positions(&candidate.fact.snippet, &range, candidate.fact.start_line);
+        item.snippet_truncated = Some(true);
+        response.truncated = true;
+        crate::legacy::measure(response, format)?;
+        if !range.is_empty() && response.estimated_tokens <= response.budget.max_tokens {
+            best = Some(range);
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    if let Some(range) = best {
+        let item = response.items.last_mut().expect("item just pushed");
+        item.snippet = candidate.fact.snippet[range.clone()].into();
+        item.start_byte = Some(candidate.fact.start_byte + range.start);
+        item.end_byte = Some(candidate.fact.start_byte + range.end);
+        (item.start_line, item.end_line) =
+            crate::excerpt::positions(&candidate.fact.snippet, &range, candidate.fact.start_line);
+    } else {
+        *response.items.last_mut().expect("item just pushed") = original;
+    }
+    crate::legacy::measure(response, format)
 }

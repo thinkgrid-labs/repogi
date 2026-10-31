@@ -206,8 +206,10 @@ dependencies = [
  "code-intel-store",
  "ignore",
  "pulldown-cmark",
+ "rustix",
  "serde",
  "serde_json",
+ "tempfile",
  "tree-sitter",
  "tree-sitter-typescript",
 ]
