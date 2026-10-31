@@ -3,7 +3,7 @@
 Repogi is a developer preview. Source repository: https://github.com/thinkgrid-labs/repogi.
 License: [MIT](../LICENSE). See [third-party notices](../THIRD_PARTY_NOTICES.md) for dependency licenses.
 
-> **Release status:** no prebuilt binary release has been published yet. The installer commands below describe the release interface and start working once the first GitHub Release exists. Until then, [build from source](#build-from-source).
+> **Release status:** the latest release is **0.1.0**. Its prebuilt binaries cover TypeScript/TSX code intelligence only. Project knowledge search, `knowledge trace`, `investigate` and project memory are not in a release yet. They are part of the next release, 0.1.1. Until it is published, [build from source](#build-from-source) to use them.
 
 Repogi is one self-contained executable, `repogi`. Running it needs no Rust, Cargo, Node.js or Python.
 
@@ -39,7 +39,7 @@ Options (also available as environment variables):
 
 | Option | Variable | Meaning |
 | --- | --- | --- |
-| `--version 0.1.0` | `REPOGI_VERSION` | Install that release, e.g. `0.2.0-preview.1`. |
+| `--version 0.1.0` | `REPOGI_VERSION` | Install that release, e.g. `0.1.1-preview.1`. |
 | `--install-dir DIR` | `REPOGI_INSTALL_DIR` | Install into `DIR` (created if missing; paths with spaces work). |
 | `--verify-attestation` | | Also run `gh attestation verify` on the archive. |
 | | `REPOGI_RELEASES_URL` | Mirror or test server replacing `https://github.com/thinkgrid-labs/repogi/releases`. HTTPS only; plain HTTP is accepted only for `127.0.0.1`/`localhost`. |

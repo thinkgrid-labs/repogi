@@ -84,17 +84,33 @@ def fact(con, path, name):
     return con.execute("SELECT id FROM facts WHERE path=? AND json_extract(data,'$.name')=? AND json_extract(data,'$.kind') NOT IN ('file','import','export')", (path, name)).fetchone()[0]
 
 
+def memory_db(root):
+    """The durable memory store (v0.5.1+), else the schema-5 index (v0.5)."""
+    durable = root / '.repogi' / 'memory.db'
+    return sqlite3.connect(durable if durable.exists() else root / '.code-intel' / 'index.db')
+
+
 def db_digest(root):
-    return hashlib.sha256((root / '.code-intel' / 'index.db').read_bytes()).hexdigest()
+    """Every file of both stores, so a read that writes anything is detected."""
+    h = hashlib.sha256()
+    for d in ['.code-intel', '.repogi']:
+        for p in sorted((root / d).glob('*')) if (root / d).exists() else []:
+            if p.is_file():
+                h.update(p.name.encode() + b'\0' + p.read_bytes())
+    return h.hexdigest()
 
 
 def db_bytes(root):
-    con = db(root)
-    return con.execute('PRAGMA page_count').fetchone()[0] * con.execute('PRAGMA page_size').fetchone()[0]
+    total = 0
+    for path in [root / '.code-intel' / 'index.db', root / '.repogi' / 'memory.db']:
+        if path.exists():
+            con = sqlite3.connect(path)
+            total += con.execute('PRAGMA page_count').fetchone()[0] * con.execute('PRAGMA page_size').fetchone()[0]
+    return total
 
 
 def memory_rows(root):
-    con = db(root)
+    con = memory_db(root)
     return {t: con.execute(f'SELECT count(*) FROM {t}').fetchone()[0] for t in ['memories', 'memory_revisions', 'memory_evidence', 'memory_events']}
 
 
@@ -156,7 +172,7 @@ def main():
         assert p.returncode == 0, p.stderr
         report['index_ms'] = round(index_ms, 2)
         report['db_bytes_before_memories'] = db_bytes(root)
-        tree_before = sorted((str(p.relative_to(root)), p.read_bytes()) for p in root.rglob('*') if p.is_file() and '.code-intel' not in p.parts)
+        tree_before = sorted((str(p.relative_to(root)), p.read_bytes()) for p in root.rglob('*') if p.is_file() and '.code-intel' not in p.parts and '.repogi' not in p.parts)
 
         # Proposals and explicit reviews.
         ids, write_ms = {}, []
@@ -310,7 +326,7 @@ def main():
             'investigate': r.timed(args.runs, 'investigate', 'Modify session expiration'),
             'investigate_include_memory': r.timed(args.runs, 'investigate', 'Modify session expiration', '--include-memory'),
         }
-        tree_after = sorted((str(p.relative_to(root)), p.read_bytes()) for p in root.rglob('*') if p.is_file() and '.code-intel' not in p.parts)
+        tree_after = sorted((str(p.relative_to(root)), p.read_bytes()) for p in root.rglob('*') if p.is_file() and '.code-intel' not in p.parts and '.repogi' not in p.parts)
         report['only_labelled_edits_changed_the_tree'] = len(tree_after) == len(tree_before) + 1
 
         # Scale: many approved memories, bounded queries.

@@ -192,55 +192,52 @@ fn bindings(node: Node<'_>, source: &str, file: &IndexedFile, module: &mut Modul
             | "enum_declaration"
             | "internal_module"
             | "variable_declarator"
-    ) {
-        if let Some(name) = node.child_by_field_name("name") {
-            let var = node
-                .parent()
-                .is_some_and(|parent| parent.kind() == "variable_declaration");
-            let visible = scope(node, var);
-            let fact = file.facts.iter().find(|fact| {
-                fact.start_byte == node.start_byte()
-                    && fact.end_byte == node.end_byte()
-                    && !matches!(fact.kind.as_str(), "file" | "import" | "export")
-            });
-            bind(
-                name,
-                visible,
-                source,
-                file,
-                module,
-                fact.map(|fact| fact.id.clone()),
-            );
-        }
+    ) && let Some(name) = node.child_by_field_name("name")
+    {
+        let var = node
+            .parent()
+            .is_some_and(|parent| parent.kind() == "variable_declaration");
+        let visible = scope(node, var);
+        let fact = file.facts.iter().find(|fact| {
+            fact.start_byte == node.start_byte()
+                && fact.end_byte == node.end_byte()
+                && !matches!(fact.kind.as_str(), "file" | "import" | "export")
+        });
+        bind(
+            name,
+            visible,
+            source,
+            file,
+            module,
+            fact.map(|fact| fact.id.clone()),
+        );
     }
     if matches!(
         node.kind(),
         "required_parameter" | "optional_parameter" | "catch_clause"
-    ) {
-        if let Some(name) = node
-            .child_by_field_name("pattern")
-            .or_else(|| node.child_by_field_name("name"))
-            .or_else(|| node.child_by_field_name("parameter"))
-        {
-            let visible = if node.kind() == "catch_clause" {
-                node
-            } else {
-                scope(node, true)
-            };
-            bind(name, visible, source, file, module, None);
-        }
+    ) && let Some(name) = node
+        .child_by_field_name("pattern")
+        .or_else(|| node.child_by_field_name("name"))
+        .or_else(|| node.child_by_field_name("parameter"))
+    {
+        let visible = if node.kind() == "catch_clause" {
+            node
+        } else {
+            scope(node, true)
+        };
+        bind(name, visible, source, file, module, None);
     }
     // Single unparenthesized arrow parameter.
-    if node.kind() == "arrow_function" {
-        if let Some(name) = node.child_by_field_name("parameter") {
-            bind(name, node, source, file, module, None);
-        }
+    if node.kind() == "arrow_function"
+        && let Some(name) = node.child_by_field_name("parameter")
+    {
+        bind(name, node, source, file, module, None);
     }
     // Named function expressions have a function-local binding only.
-    if matches!(node.kind(), "function_expression" | "generator_function") {
-        if let Some(name) = node.child_by_field_name("name") {
-            bind(name, node, source, file, module, None);
-        }
+    if matches!(node.kind(), "function_expression" | "generator_function")
+        && let Some(name) = node.child_by_field_name("name")
+    {
+        bind(name, node, source, file, module, None);
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
@@ -254,37 +251,38 @@ fn literal(node: Node<'_>, source: &str) -> String {
         .into()
 }
 fn bind_type_parameter(node: Node<'_>, source: &str, file: &IndexedFile, module: &mut Module) {
-    if node.kind() == "type_parameter" {
-        if let Some(name) = node.child_by_field_name("name") {
-            let mut visible = node;
-            while let Some(parent) = visible.parent() {
-                visible = parent;
-                if is_function(visible)
-                    || matches!(
-                        visible.kind(),
-                        "class_declaration" | "interface_declaration" | "type_alias_declaration"
-                    )
-                {
-                    break;
-                }
+    if node.kind() == "type_parameter"
+        && let Some(name) = node.child_by_field_name("name")
+    {
+        let mut visible = node;
+        while let Some(parent) = visible.parent() {
+            visible = parent;
+            if is_function(visible)
+                || matches!(
+                    visible.kind(),
+                    "class_declaration" | "interface_declaration" | "type_alias_declaration"
+                )
+            {
+                break;
             }
-            bind(name, visible, source, file, module, None);
         }
+        bind(name, visible, source, file, module, None);
     }
-    if node.kind() == "for_in_statement" && node.child_by_field_name("kind").is_some() {
-        if let Some(left) = node.child_by_field_name("left") {
-            let visible = if token(node, "var") {
-                scope(node, true)
-            } else {
-                node
-            };
-            bind(left, visible, source, file, module, None);
-        }
+    if node.kind() == "for_in_statement"
+        && node.child_by_field_name("kind").is_some()
+        && let Some(left) = node.child_by_field_name("left")
+    {
+        let visible = if token(node, "var") {
+            scope(node, true)
+        } else {
+            node
+        };
+        bind(left, visible, source, file, module, None);
     }
-    if node.kind() == "class" {
-        if let Some(name) = node.child_by_field_name("name") {
-            bind(name, node, source, file, module, None);
-        }
+    if node.kind() == "class"
+        && let Some(name) = node.child_by_field_name("name")
+    {
+        bind(name, node, source, file, module, None);
     }
 }
 
@@ -561,15 +559,15 @@ fn uses(node: Node<'_>, source: &str, file: &IndexedFile, module: &mut Module) {
         }
         return;
     }
-    if node.kind() == "call_expression" {
-        if let Some(function) = node.child_by_field_name("function") {
-            usage(node, function, Relationship::Calls, source, file, module);
-        }
+    if node.kind() == "call_expression"
+        && let Some(function) = node.child_by_field_name("function")
+    {
+        usage(node, function, Relationship::Calls, source, file, module);
     }
-    if node.kind() == "extends_clause" {
-        if let Some(value) = node.child_by_field_name("value") {
-            usage(node, value, Relationship::Extends, source, file, module);
-        }
+    if node.kind() == "extends_clause"
+        && let Some(value) = node.child_by_field_name("value")
+    {
+        usage(node, value, Relationship::Extends, source, file, module);
     }
     if node.kind() == "member_expression" {
         usage(node, node, Relationship::References, source, file, module);
@@ -616,21 +614,20 @@ fn is_component(name: Node<'_>, source: &str) -> bool {
     }
 }
 fn mutations(node: Node<'_>, source: &str, writes: &mut Vec<(String, usize)>) {
-    if node.kind() == "for_in_statement" && node.child_by_field_name("kind").is_none() {
-        if let Some(left) = node.child_by_field_name("left") {
-            assigned_names(left, source, writes);
-        }
+    if node.kind() == "for_in_statement"
+        && node.child_by_field_name("kind").is_none()
+        && let Some(left) = node.child_by_field_name("left")
+    {
+        assigned_names(left, source, writes);
     }
     if matches!(
         node.kind(),
         "assignment_expression" | "augmented_assignment_expression" | "update_expression"
-    ) {
-        if let Some(left) = node
-            .child_by_field_name("left")
-            .or_else(|| node.child_by_field_name("argument"))
-        {
-            assigned_names(left, source, writes);
-        }
+    ) && let Some(left) = node
+        .child_by_field_name("left")
+        .or_else(|| node.child_by_field_name("argument"))
+    {
+        assigned_names(left, source, writes);
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {

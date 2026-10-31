@@ -141,10 +141,10 @@ fn run(
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        if let Some(message) = classify(&shared, line) {
-            if sender.send(message).is_err() {
-                break;
-            }
+        if let Some(message) = classify(&shared, line)
+            && sender.send(message).is_err()
+        {
+            break;
         }
     }
     // stdin closed: the client is shutting down. Already-queued requests are

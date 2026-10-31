@@ -92,6 +92,17 @@ fn scalar(root: &Path, sql: &str) -> i64 {
     db(root).query_row(sql, [], |r| r.get(0)).unwrap()
 }
 
+/// The durable memory store (memories no longer live in the code index).
+fn mem(root: &Path) -> Connection {
+    let path = root.join(".repogi/memory.db");
+    assert!(path.is_file(), "no memory store at {}", path.display());
+    Connection::open(path).unwrap()
+}
+
+fn mscalar(root: &Path, sql: &str) -> i64 {
+    mem(root).query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
 fn relationship(root: &Path, author: &str, kind: &str) -> String {
     db(root)
         .query_row(
@@ -174,8 +185,23 @@ fn search_ids(root: &Path, query: &str, extra: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn database_bytes(root: &Path) -> Vec<u8> {
-    fs::read(root.join(".code-intel/index.db")).unwrap()
+/// Bytes of every database and side file, so a read that writes anything
+/// (either store, a journal, or a newly created file) is detected.
+fn database_bytes(root: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files = Vec::new();
+    for dir in [".code-intel", ".repogi"] {
+        let Ok(entries) = fs::read_dir(root.join(dir)) else {
+            continue;
+        };
+        for entry in entries {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                files.push((path.display().to_string(), fs::read(&path).unwrap()));
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 #[test]
@@ -216,7 +242,10 @@ fn proposals_stay_pending_and_never_authoritative_until_approved() {
     );
     assert_eq!(shown["pending"]["verification"], "current");
     assert!(shown.get("approved").is_none());
-    assert_eq!(scalar(root.path(), "SELECT count(*) FROM memory_events"), 1);
+    assert_eq!(
+        mscalar(root.path(), "SELECT count(*) FROM memory_events"),
+        1
+    );
 }
 
 #[test]
@@ -611,7 +640,7 @@ fn supersession_retains_both_memories_and_their_lineage() {
 fn evidence_snapshots_are_immutable_and_stored_by_value() {
     let root = fixture();
     let id = sqlite_decision(root.path());
-    let stored: String = db(root.path())
+    let stored: String = mem(root.path())
         .query_row(
             "SELECT data FROM memory_evidence WHERE memory_id=?1 AND ordinal=0",
             [&id],
@@ -623,7 +652,7 @@ fn evidence_snapshots_are_immutable_and_stored_by_value() {
     assert_eq!(snapshot["decision_status"], "accepted");
     assert_eq!(snapshot["index_revision"], 1);
     assert_eq!(snapshot["range_hash"].as_str().unwrap().len(), 64);
-    let connection = db(root.path());
+    let connection = mem(root.path());
     for sql in [
         "UPDATE memory_evidence SET data='{}'",
         "DELETE FROM memory_evidence",
@@ -652,7 +681,7 @@ fn evidence_snapshots_are_immutable_and_stored_by_value() {
     )
     .unwrap();
     index(root.path());
-    let after: String = db(root.path())
+    let after: String = mem(root.path())
         .query_row(
             "SELECT data FROM memory_evidence WHERE memory_id=?1 AND ordinal=0",
             [&id],
@@ -707,7 +736,7 @@ fn source_changes_mark_evidence_stale_without_editing_the_memory() {
     );
     // Verification is read-only unless explicitly recorded.
     assert_eq!(
-        scalar(
+        mscalar(
             root.path(),
             "SELECT count(*) FROM memory_events WHERE action='verified'"
         ),
@@ -887,7 +916,7 @@ fn ambiguous_unsupported_and_unknown_evidence_is_refused_at_proposal() {
         ]
     );
     assert_eq!(
-        scalar(root.path(), "SELECT count(*) FROM memories"),
+        mscalar(root.path(), "SELECT count(*) FROM memories"),
         1,
         "refused proposals write nothing"
     );
@@ -1057,7 +1086,7 @@ fn duplicate_proposals_are_refused_case_and_punctuation_insensitively() {
         "Session records are stored in an embedded SQLite database file; no external database server is required.",
         &["--evidence", "ADR-0001"],
     );
-    assert_eq!(scalar(root.path(), "SELECT count(*) FROM memories"), 2);
+    assert_eq!(mscalar(root.path(), "SELECT count(*) FROM memories"), 2);
     assert_eq!(
         json(root.path(), &["memory", "list"])["memories"][0]["id"],
         id.as_str()
@@ -1137,7 +1166,7 @@ fn concurrent_writers_cannot_both_review_or_overwrite_a_revision() {
         .filter(|won| *won)
         .count();
     assert_eq!(wins, 1, "exactly one review of revision 2 commits");
-    let events = scalar(
+    let events = mscalar(
         root.path(),
         &format!(
             "SELECT count(*) FROM memory_events WHERE memory_id='{id}' AND revision=2 AND action IN ('approved','rejected')"
@@ -1157,7 +1186,7 @@ fn a_failed_write_rolls_back_completely() {
         &["--evidence", "REQ-AUTH-003"],
     );
     // Simulate a failure on the last statement of the approval transaction.
-    db(root.path()).execute_batch("CREATE TRIGGER fail_approval BEFORE INSERT ON memory_events WHEN NEW.action='approved' BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
+    mem(root.path()).execute_batch("CREATE TRIGGER fail_approval BEFORE INSERT ON memory_events WHEN NEW.action='approved' BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
     let output = run(
         root.path(),
         &[
@@ -1173,28 +1202,31 @@ fn a_failed_write_rolls_back_completely() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("injected failure"));
     assert_eq!(
-        scalar(
+        mscalar(
             root.path(),
             "SELECT count(*) FROM memories WHERE status='pending_review' AND pending_revision=1 AND approved_revision IS NULL AND version=1"
         ),
         1
     );
     assert_eq!(
-        scalar(
+        mscalar(
             root.path(),
             "SELECT count(*) FROM memory_revisions WHERE state='proposed'"
         ),
         1
     );
-    assert_eq!(scalar(root.path(), "SELECT count(*) FROM memory_events"), 1);
-    db(root.path())
+    assert_eq!(
+        mscalar(root.path(), "SELECT count(*) FROM memory_events"),
+        1
+    );
+    mem(root.path())
         .execute_batch("DROP TRIGGER fail_approval;")
         .unwrap();
     approve(root.path(), &id, &digest);
 }
 
 #[test]
-fn schema_4_indexes_migrate_on_index_only_and_reads_never_migrate() {
+fn memory_is_independent_of_the_index_schema_and_never_migrates_it() {
     let root = fixture();
     // Reconstruct a schema-4 index: the v0.4 schema is v5 without memory objects.
     db(root.path())
@@ -1204,50 +1236,48 @@ fn schema_4_indexes_migrate_on_index_only_and_reads_never_migrate() {
         .unwrap();
     let facts = scalar(root.path(), "SELECT count(*) FROM facts");
     let bytes = database_bytes(root.path());
-    assert_eq!(
-        refused(root.path(), &["memory", "list"]),
-        "memory_unavailable"
-    );
-    assert_eq!(
-        refused(
-            root.path(),
-            &[
-                "memory",
-                "propose",
-                "--type",
-                "requirement",
-                "--title",
-                "t",
-                "--claim",
-                "c",
-                "--evidence",
-                "REQ-AUTH-001"
-            ]
-        ),
-        "memory_unavailable"
+    // Reads see an empty memory store and create nothing.
+    assert!(
+        json(root.path(), &["memory", "list"])["memories"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     let plan = json(
         root.path(),
         &["investigate", "session expiration", "--include-memory"],
     );
     assert!(
-        plan["completeness"]["unsupported"]
+        plan["evidence"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|u| u.as_str().unwrap().contains("project memory unavailable"))
+            .all(|e| e["class"] != "approved_project_memory")
     );
     ok(root.path(), &["investigate", "session expiration"]);
     assert_eq!(
         bytes,
         database_bytes(root.path()),
-        "reads and refused writes never migrate"
+        "reads never migrate or create anything"
     );
+    // A memory write creates the durable store and leaves the index schema alone.
+    let index_bytes = fs::read(root.path().join(".code-intel/index.db")).unwrap();
+    let id = sqlite_decision(root.path());
+    assert_eq!(
+        index_bytes,
+        fs::read(root.path().join(".code-intel/index.db")).unwrap(),
+        "memory writes never migrate or write the code index"
+    );
+    assert_eq!(scalar(root.path(), "PRAGMA user_version"), 4);
     index(root.path());
     assert_eq!(scalar(root.path(), "PRAGMA user_version"), 5);
     assert_eq!(scalar(root.path(), "SELECT count(*) FROM facts"), facts);
-    sqlite_decision(root.path());
-    // A newer schema is refused by memory writes instead of being downgraded.
+    assert_eq!(scalar(root.path(), "SELECT count(*) FROM memories"), 0);
+    assert_eq!(
+        json(root.path(), &["memory", "show", &id])["memory"]["status"],
+        "approved"
+    );
+    // A newer index schema is refused by memory writes instead of being downgraded.
     db(root.path())
         .execute_batch("PRAGMA user_version=6;")
         .unwrap();
@@ -1268,6 +1298,24 @@ fn schema_4_indexes_migrate_on_index_only_and_reads_never_migrate() {
             ]
         ),
         "command_failed"
+    );
+    // So is a newer memory store schema, by reads and writes alike.
+    db(root.path())
+        .execute_batch("PRAGMA user_version=5;")
+        .unwrap();
+    mem(root.path())
+        .execute_batch("PRAGMA user_version=2;")
+        .unwrap();
+    assert_eq!(
+        refused(root.path(), &["memory", "list"]),
+        "memory_store_newer"
+    );
+    assert_eq!(
+        refused(
+            root.path(),
+            &["memory", "retire", &id, "--reason", "x", "--reviewer", "a"]
+        ),
+        "memory_store_newer"
     );
 }
 
@@ -1741,7 +1789,10 @@ fn repository_text_and_stored_claims_are_data_not_instructions() {
         json(root.path(), &["memory", "show", &id])["memory"]["status"],
         "pending_review"
     );
-    assert_eq!(scalar(root.path(), "SELECT count(*) FROM memory_events"), 1);
+    assert_eq!(
+        mscalar(root.path(), "SELECT count(*) FROM memory_events"),
+        1
+    );
     // The note itself cannot be backing evidence for an approval it "grants".
     let (note, _) = propose(
         root.path(),
@@ -1791,7 +1842,7 @@ fn repository_text_and_stored_claims_are_data_not_instructions() {
         hostile
     );
     assert_eq!(
-        scalar(
+        mscalar(
             root.path(),
             "SELECT count(*) FROM memories WHERE status='approved'"
         ),
@@ -1822,6 +1873,14 @@ fn indexing_investigation_and_searches_never_create_memories() {
         ok(root.path(), &args);
     }
     index(root.path());
+    // No memory store is even created by indexing, reads or investigation.
+    assert!(!root.path().join(".repogi").exists());
     assert_eq!(scalar(root.path(), "SELECT count(*) FROM memories"), 0);
-    assert_eq!(scalar(root.path(), "SELECT count(*) FROM memory_events"), 0);
+    assert!(
+        json(root.path(), &["memory", "list"])["memories"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!root.path().join(".repogi").exists());
 }

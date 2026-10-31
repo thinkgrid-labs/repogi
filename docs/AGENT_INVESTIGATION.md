@@ -1,6 +1,6 @@
 # Agent investigation
 
-Agent Investigation is an internal development milestone (v0.4; restructured without output changes in v0.4.1; opt-in project memory in v0.5), not a published release. The workspace version remains 0.1.0. Public release preparation is deferred until the persistent-memory milestone has been validated and publication is explicitly approved.
+Agent investigation is part of release 0.1.1. Until 0.1.1 is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
 
 `repogi investigate` turns a development task into an ordered, evidence-backed **investigation plan**: where to start reading, which requirements and decisions govern the behavior, which static consumers and test candidates to look at, and what is unresolved, stale or missing. Every step cites indexed repository evidence and names a bounded next read or query.
 
@@ -24,7 +24,7 @@ repogi investigate "Investigate token refresh failures" --depth 3 --max-bytes 20
 | `--max-steps` | 8 | 1–16 | Steps returned after selection. |
 | `--depth` | 2 | 1–3 | Upstream static-consumer hops from each code target. |
 | `--selector` | none | up to 8 | Exact knowledge entity ID, author ID (`REQ-…`, `ADR-…`) or code fact ID. Repeatable. |
-| `--include-memory` | off | flag | Add approved [project memories](PROJECT_MEMORY.md) as `approved_project_memory` evidence. Off: output is unchanged from v0.4. |
+| `--include-memory` | off | flag | Add approved [project memories](PROJECT_MEMORY.md) as `approved_project_memory` evidence. Off: output is unchanged. |
 
 `REQ-…` and `ADR-…` tokens written in the task itself (uppercase, as indexed) are also treated as selectors. Names are never resolved by similarity: a selector that matches nothing is reported as `selector_not_found`, and one that matches several entities is reported as `ambiguous_selector` with every match shown.
 
@@ -134,7 +134,7 @@ repogi mcp --root /abs/path/to/project --tools atlas_context,atlas_references,at
 {"task":"Modify session expiration","selectors":["REQ-AUTH-001"],"max_bytes":12000,"max_steps":8,"depth":2,"format":"json"}
 ```
 
-`task` is required (at most 8192 bytes). `max_bytes` defaults to 12000 and accepts 256–32000. `format` is `agent` (the text projection) or `json`. `root` follows the usual rules: optional with one configured root, required with several, and it must be an absolute configured root. Unknown arguments are rejected. When `atlas_memory` is also enabled, the schema gains `include_memory` (boolean); otherwise the definition is byte-identical to v0.4 and `include_memory` is refused. The tool opens the index read-only and never indexes. It registers for cancellation like the other tools. The definition carries `readOnlyHint: true`.
+`task` is required (at most 8192 bytes). `max_bytes` defaults to 12000 and accepts 256–32000. `format` is `agent` (the text projection) or `json`. `root` follows the usual rules: optional with one configured root, required with several, and it must be an absolute configured root. Unknown arguments are rejected. When `atlas_memory` is also enabled, the schema gains `include_memory` (boolean); otherwise the definition is byte-identical to the tool without memory support and `include_memory` is refused. The tool opens the index read-only and never indexes. It registers for cancellation like the other tools. The definition carries `readOnlyHint: true`.
 
 ## Limits and work bounds
 

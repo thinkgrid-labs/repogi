@@ -60,15 +60,16 @@ impl Investigation<'_> {
     }
 
     pub(super) fn recall(&mut self, terms: &[String]) -> Result<()> {
-        if !self.store.memory_available()? {
-            self.found.unsupported.push(
-                "project memory unavailable (index schema < 5); run `repogi index <path>` with this binary".into(),
-            );
+        // No memory store means no memory has been recorded: nothing to recall.
+        let Some(memory) = self.memory else {
             return Ok(());
-        }
+        };
         let subjects = self.plan_subjects();
         let recalled = crate::memory::relevant(
-            self.store,
+            crate::memory::Stores {
+                memory,
+                index: Some(self.store),
+            },
             &crate::memory::Relevance {
                 subjects: &subjects,
                 selected: !self.found.selected.is_empty(),

@@ -35,7 +35,8 @@ enum Command {
         #[arg(long)]
         expected_envelope_digest: Option<String>,
     },
-    /// Index a repository offline. Outputs a JSON run report.
+    /// Index a repository offline. Outputs a JSON run report. Memories still
+    /// stored in a schema-5 index are first migrated to .repogi/memory.db.
     Index { path: PathBuf },
     /// Inspect the nearest ancestor .code-intel index. Outputs JSON.
     Status,
@@ -97,9 +98,10 @@ enum Command {
         #[arg(long)]
         include_memory: bool,
     },
-    /// Reviewed project memory. list/show/history/search/verify/conflicts are
-    /// read-only; propose/correct/approve/reject/supersede/retire are explicit
-    /// writes, and review writes need a digest and a named reviewer.
+    /// Reviewed project memory, stored durably in .repogi/memory.db.
+    /// list/show/history/search/verify/conflicts/status/export are read-only;
+    /// propose/correct/approve/reject/supersede/retire/migrate/import/rebind
+    /// are explicit writes, and review writes need a digest and a named reviewer.
     Memory {
         #[command(subcommand)]
         command: memory_command::MemoryCommand,
@@ -285,10 +287,13 @@ fn run(cli: Cli) -> Result<String> {
             );
             Ok(format!("{}\n", verified.report()))
         }
-        Command::Index { path } => Ok(format!(
-            "{}\n",
-            serde_json::to_string(&code_intel_index::index(&path)?)?
-        )),
+        Command::Index { path } => {
+            preserve_memories(&path);
+            Ok(format!(
+                "{}\n",
+                serde_json::to_string(&code_intel_index::index(&path)?)?
+            ))
+        }
         Command::Mcp {
             roots,
             profile,
@@ -390,7 +395,17 @@ fn run(cli: Cli) -> Result<String> {
                 },
                 include_memory,
             };
-            let response = investigate::investigate(&store, &request, format)?;
+            let memory = if request.include_memory {
+                let root = store
+                    .root()?
+                    .map(PathBuf::from)
+                    .context("index records no root")?;
+                Some(code_intel_store::MemoryStore::open_read(&root)?)
+            } else {
+                None
+            };
+            let response =
+                investigate::investigate_with_memory(&store, memory.as_ref(), &request, format)?;
             investigate::render(&response, format)
         }
         Command::Memory { command } => memory_command::run(command),
@@ -489,6 +504,30 @@ fn run(cli: Cli) -> Result<String> {
                 code_intel_retrieval::signal::context(&store, &task, max_tokens, format, &options)?;
             code_intel_retrieval::render(&response, format)
         }
+    }
+}
+
+/// Before indexing, copy memories still held by a schema-5 index into the
+/// durable store, so a later rebuild or deletion of `.code-intel` cannot lose
+/// them. Indexing proceeds either way (it never touches memory rows); a failed
+/// migration is reported on stderr and retried by the next memory write.
+fn preserve_memories(path: &Path) {
+    // Invalid paths and state are reported by the indexer itself.
+    let Ok(root) = path.canonicalize() else {
+        return;
+    };
+    if validate_state_path(&root).is_err() {
+        return;
+    }
+    match code_intel_store::migrate_memory(&root, &code_intel_core::memory::utc_now()) {
+        Ok(Some(report)) if report.outcome != "already_migrated" => eprintln!(
+            "repogi: {} {} memories from .code-intel/index.db into .repogi/memory.db",
+            report.outcome, report.counts.memories
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!(
+            "repogi: memories in .code-intel/index.db were not migrated ({error:#}); run `repogi memory migrate` before deleting .code-intel"
+        ),
     }
 }
 

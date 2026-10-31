@@ -84,10 +84,10 @@ fn without_hint(text: &str) -> Vec<String> {
         .filter(|line| !line.starts_with("next hop: "))
         .map(str::to_owned)
         .collect();
-    if let Some(first) = lines.first_mut() {
-        if let Some(position) = first.rfind(" · ") {
-            first.truncate(position);
-        }
+    if let Some(first) = lines.first_mut()
+        && let Some(position) = first.rfind(" · ")
+    {
+        first.truncate(position);
     }
     lines
 }

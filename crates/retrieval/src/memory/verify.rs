@@ -9,10 +9,10 @@ use code_intel_core::{
     memory::{EvidenceRole, EvidenceSnapshot, Revision},
     relationships::{KnowledgeRelationship, ResolutionStatus, SourceRange},
 };
-use code_intel_store::Store;
+use code_intel_store::{MemoryStore, Store};
 use serde::Serialize;
 
-use super::{MAX_VERIFY_FILES, Note, clean, indexed_hash, label};
+use super::{MAX_VERIFY_FILES, Note, Stores, clean, indexed_hash, label};
 
 /// Severity order: the worst backing state is the memory's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -54,7 +54,9 @@ pub struct EvidenceCheck {
 pub struct MemoryCheck {
     /// Worst state over backing evidence; `unverified` without backing.
     pub state: State,
-    pub index_revision: u64,
+    /// Absent without a code index (every item is then `unverified`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_revision: Option<u64>,
     pub evidence: Vec<EvidenceCheck>,
 }
 
@@ -67,29 +69,55 @@ enum File {
 
 /// One request's verifier; cached reads keep repeated citations consistent.
 pub(crate) struct Checker<'a> {
-    store: &'a Store,
-    root: Option<PathBuf>,
-    revision: u64,
+    /// `None` without a code index: nothing can be checked then.
+    store: Option<&'a Store>,
+    memory: Option<&'a MemoryStore>,
+    root: PathBuf,
+    revision: Option<u64>,
     files: BTreeMap<String, File>,
     pub limit_reached: bool,
 }
 
 impl<'a> Checker<'a> {
-    pub fn new(store: &'a Store) -> Result<Self> {
+    /// Files are read under the memory store's root, which callers have
+    /// checked against the index root.
+    pub fn new(stores: Stores<'a>) -> Result<Self> {
         Ok(Self {
-            store,
-            root: store.root()?.map(PathBuf::from),
-            revision: store.revision()?,
+            store: stores.index,
+            memory: Some(stores.memory),
+            root: PathBuf::from(stores.memory.root()),
+            revision: stores.index.map(Store::revision).transpose()?,
             files: BTreeMap::new(),
             limit_reached: false,
         })
+    }
+
+    pub fn with_root(store: &'a Store, root: &str) -> Result<Self> {
+        Ok(Self {
+            store: Some(store),
+            memory: None,
+            root: PathBuf::from(root),
+            revision: Some(store.revision()?),
+            files: BTreeMap::new(),
+            limit_reached: false,
+        })
+    }
+
+    fn check_cancelled(&self) -> Result<()> {
+        if let Some(store) = self.store {
+            store.check_cancelled()?;
+        }
+        if let Some(memory) = self.memory {
+            memory.check_cancelled()?;
+        }
+        Ok(())
     }
 
     pub fn revision(&mut self, revision: &Revision) -> Result<MemoryCheck> {
         let mut evidence = Vec::new();
         let mut state: Option<State> = None;
         for (ordinal, snapshot) in revision.evidence.iter().enumerate() {
-            self.store.check_cancelled()?;
+            self.check_cancelled()?;
             let check = self.evidence(ordinal, snapshot)?;
             if snapshot.role == EvidenceRole::Backing {
                 state = Some(state.map_or(check.state, |s| s.max(check.state)));
@@ -114,19 +142,38 @@ impl<'a> Checker<'a> {
             changes: Vec::new(),
             current: None,
         };
-        let Some(citation) = self.identity(snapshot, &mut check)? else {
+        let (Some(store), Some(now)) = (self.store, self.revision) else {
+            downgrade(
+                &mut check,
+                State::Unverified,
+                "index_unavailable",
+                "the code index is missing, so this evidence cannot be checked; run `repogi index <path>` (approval history is unaffected)".into(),
+            );
+            return Ok(check);
+        };
+        let Some(citation) = self.identity(store, snapshot, &mut check)? else {
             return Ok(check);
         };
         if citation != snapshot.citation {
             check.current = Some(citation.clone());
         }
-        self.bytes(snapshot, &citation, &mut check)?;
-        if self.revision != snapshot.index_revision {
+        self.bytes(store, snapshot, &citation, &mut check)?;
+        if now < snapshot.index_revision {
+            // Revisions only grow within one index, so this one was rebuilt or
+            // replaced; the identity above was re-resolved in it, never assumed.
+            check.changes.push(Note {
+                code: "index_rebuilt",
+                detail: format!(
+                    "captured at index revision {}; the index was rebuilt or replaced (now revision {now}) and the identity was re-resolved in it",
+                    snapshot.index_revision
+                ),
+            });
+        } else if now != snapshot.index_revision {
             check.changes.push(Note {
                 code: "index_revision_advanced",
                 detail: format!(
-                    "captured at index revision {}; the index is now at {}",
-                    snapshot.index_revision, self.revision
+                    "captured at index revision {}; the index is now at {now}",
+                    snapshot.index_revision
                 ),
             });
         }
@@ -137,11 +184,11 @@ impl<'a> Checker<'a> {
     /// unresolved identity); otherwise the current citation is returned.
     fn identity(
         &self,
+        store: &Store,
         snapshot: &EvidenceSnapshot,
         check: &mut EvidenceCheck,
     ) -> Result<Option<SourceRange>> {
-        let knowledge =
-            self.store.knowledge_available()? && self.store.relationships_available()?;
+        let knowledge = store.knowledge_available()? && store.relationships_available()?;
         match snapshot.kind.as_str() {
             "knowledge_relationship"
             | "requirement"
@@ -158,22 +205,23 @@ impl<'a> Checker<'a> {
                 );
                 Ok(None)
             }
-            "knowledge_relationship" => self.relationship(snapshot, check),
+            "knowledge_relationship" => self.relationship(store, snapshot, check),
             "requirement" | "architecture_decision" | "document" | "document_section" => {
-                self.entity(snapshot, check)
+                self.entity(store, snapshot, check)
             }
-            "static_relationship" => self.static_edge(snapshot, check),
-            _ => self.code(snapshot, check),
+            "static_relationship" => self.static_edge(store, snapshot, check),
+            _ => self.code(store, snapshot, check),
         }
     }
 
+    #[allow(clippy::unused_self)] // A step of this request's check, like its siblings.
     fn entity(
         &self,
+        store: &Store,
         snapshot: &EvidenceSnapshot,
         check: &mut EvidenceCheck,
     ) -> Result<Option<SourceRange>> {
-        let exact = self
-            .store
+        let exact = store
             .knowledge_entities(&snapshot.subject_id, 2)?
             .into_iter()
             .find(|e| e.id == snapshot.subject_id);
@@ -181,7 +229,7 @@ impl<'a> Checker<'a> {
             entity
         } else {
             let candidates = match &snapshot.explicit_id {
-                Some(explicit) => self.store.knowledge_entities(explicit, 3)?,
+                Some(explicit) => store.knowledge_entities(explicit, 3)?,
                 None => vec![],
             };
             match candidates.as_slice() {
@@ -246,8 +294,10 @@ impl<'a> Checker<'a> {
         Ok(Some(entity.source))
     }
 
+    #[allow(clippy::unused_self)] // A step of this request's check, like its siblings.
     fn relationship(
         &self,
+        store: &Store,
         snapshot: &EvidenceSnapshot,
         check: &mut EvidenceCheck,
     ) -> Result<Option<SourceRange>> {
@@ -260,13 +310,12 @@ impl<'a> Checker<'a> {
             );
             return Ok(None);
         };
-        let edge = if let Some(edge) = self.store.knowledge_relationship(&snapshot.subject_id)? {
+        let edge = if let Some(edge) = store.knowledge_relationship(&snapshot.subject_id)? {
             edge
         } else {
             // IDs include the claim's byte offset: look for the same claim
             // (source, kind, target text) elsewhere in the same source.
-            let same: Vec<KnowledgeRelationship> = self
-                .store
+            let same: Vec<KnowledgeRelationship> = store
                 .knowledge_neighbors(&recorded.source_id, 65)?
                 .into_iter()
                 .filter(|e| {
@@ -343,6 +392,7 @@ impl<'a> Checker<'a> {
 
     fn static_edge(
         &self,
+        store: &Store,
         snapshot: &EvidenceSnapshot,
         check: &mut EvidenceCheck,
     ) -> Result<Option<SourceRange>> {
@@ -357,13 +407,15 @@ impl<'a> Checker<'a> {
         };
         let target = recorded.target_id.clone().unwrap_or_default();
         let mut endpoints = (recorded.source_id.clone(), target.clone());
-        if self.store.fact(&endpoints.0)?.is_none() || self.store.fact(&endpoints.1)?.is_none() {
+        if store.fact(&endpoints.0)?.is_none() || store.fact(&endpoints.1)?.is_none() {
             let source = self.relocate(
+                store,
                 &recorded.source_id,
                 recorded.source_name.as_deref(),
                 Some(&snapshot.citation.path),
             )?;
             let target = self.relocate(
+                store,
                 &target,
                 recorded.target_name.as_deref(),
                 recorded.target_path.as_deref(),
@@ -393,9 +445,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let edges = self
-            .store
-            .semantic_edges_between(&endpoints.0, &endpoints.1, 4)?;
+        let edges = store.semantic_edges_between(&endpoints.0, &endpoints.1, 4)?;
         let Some(edge) = edges.iter().find(|e| label(&e.kind) == recorded.kind) else {
             downgrade(
                 check,
@@ -410,10 +460,11 @@ impl<'a> Checker<'a> {
 
     fn code(
         &self,
+        store: &Store,
         snapshot: &EvidenceSnapshot,
         check: &mut EvidenceCheck,
     ) -> Result<Option<SourceRange>> {
-        if let Some(fact) = self.store.fact(&snapshot.subject_id)? {
+        if let Some(fact) = store.fact(&snapshot.subject_id)? {
             return Ok(Some(super::fact_range(&fact)));
         }
         if snapshot.kind == "file" {
@@ -426,6 +477,7 @@ impl<'a> Checker<'a> {
             return Ok(None);
         }
         match self.relocate(
+            store,
             &snapshot.subject_id,
             Some(&snapshot.title),
             Some(&snapshot.citation.path),
@@ -437,7 +489,7 @@ impl<'a> Checker<'a> {
                     "identity_relocated",
                     format!("the declaration is now {}", clean(&id)),
                 );
-                Ok(self.store.fact(&id)?.map(|f| super::fact_range(&f)))
+                Ok(store.fact(&id)?.map(|f| super::fact_range(&f)))
             }
             Err(state) => {
                 downgrade(
@@ -461,21 +513,22 @@ impl<'a> Checker<'a> {
 
     /// A moved declaration keeps its kind, exact name and file. Anything else
     /// (renamed, moved file, several candidates) is not re-located.
+    #[allow(clippy::unused_self)] // A step of this request's check, like its siblings.
     fn relocate(
         &self,
+        store: &Store,
         id: &str,
         name: Option<&str>,
         path: Option<&str>,
     ) -> Result<std::result::Result<String, State>> {
-        if self.store.fact(id)?.is_some() {
+        if store.fact(id)?.is_some() {
             return Ok(Ok(id.to_owned()));
         }
         let (Some(name), Some(path)) = (name, path) else {
             return Ok(Err(State::Missing));
         };
         let kind = id.split(':').next().unwrap_or_default();
-        let found: Vec<String> = self
-            .store
+        let found: Vec<String> = store
             .facts_named(name, Some(path), 4)?
             .into_iter()
             .filter(|f| f.kind == kind && f.name == name)
@@ -491,12 +544,13 @@ impl<'a> Checker<'a> {
     /// Compare the working-tree bytes at the current citation with the recorded hash.
     fn bytes(
         &mut self,
+        store: &Store,
         snapshot: &EvidenceSnapshot,
         citation: &SourceRange,
         check: &mut EvidenceCheck,
     ) -> Result<()> {
         let path = citation.path.clone();
-        let Some(indexed) = indexed_hash(self.store, &path)? else {
+        let Some(indexed) = indexed_hash(store, &path)? else {
             downgrade(
                 check,
                 State::Missing,
@@ -510,15 +564,10 @@ impl<'a> Checker<'a> {
                 self.limit_reached = true;
                 File::NotChecked
             } else {
-                match self
-                    .root
-                    .as_deref()
-                    .map(|root| code_intel_index::selected_source_bytes(root, &path))
-                {
-                    Some(Ok(Some(bytes))) => File::Read(bytes),
-                    Some(Ok(None)) => File::Missing,
-                    Some(Err(error)) => File::Unreadable(format!("{error:#}")),
-                    None => File::Unreadable("the index records no repository root".into()),
+                match code_intel_index::selected_source_bytes(&self.root, &path) {
+                    Ok(Some(bytes)) => File::Read(bytes),
+                    Ok(None) => File::Missing,
+                    Err(error) => File::Unreadable(format!("{error:#}")),
                 }
             };
             self.files.insert(path.clone(), file);

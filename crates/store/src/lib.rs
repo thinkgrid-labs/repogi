@@ -1,12 +1,19 @@
 //! SQLite persistence, versioned schema, FTS5, and bounded graph reads.
+mod durable;
 mod knowledge;
 mod memory;
 mod relationships;
 mod semantic;
 
+pub use durable::{
+    Counts, ImportRecord, ImportedMemory, MEMORY_APPLICATION_ID, MEMORY_DIR, MEMORY_FILE,
+    MEMORY_SCHEMA_VERSION, MemorySource, MemoryStore, MigrationReport, Reconciled, ReviewImport,
+    StoreEvent, StoreStatus, migrate as migrate_memory, rebind as rebind_memory, reconcile,
+};
 pub use knowledge::DocumentUpdate;
 pub use memory::{
     Act, AssertionClash, Decision, MemoryError, MemoryFilter, MemoryHit, NewRevision,
+    fault as test_fault,
 };
 
 pub use semantic::profile;
@@ -29,7 +36,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 const MIGRATION_1: &str = include_str!("migration_1.sql");
 const DATABASE_VERSION: u32 = 5;
 const MIGRATION_4: &str = include_str!("migration_4.sql");
-const MIGRATION_5: &str = include_str!("migration_5.sql");
+pub(crate) const MIGRATION_5: &str = include_str!("migration_5.sql");
 const MIGRATION_2: &str = include_str!("migration_2.sql");
 const MIGRATION_3: &str = include_str!("migration_3.sql");
 
@@ -129,6 +136,9 @@ impl Store {
         connection.execute_batch(
             "CREATE INDEX IF NOT EXISTS facts_path ON facts(path); CREATE INDEX IF NOT EXISTS edges_path ON edges(path);",
         )?;
+        // Memories live in `.repogi/memory.db`; schema-5 memory tables are kept
+        // only for migration and frozen so older binaries cannot write them.
+        durable::freeze_legacy(&connection)?;
         let stored_root: Option<String> = connection
             .query_row("SELECT value FROM metadata WHERE key='root'", [], |row| {
                 row.get(0)
@@ -933,14 +943,32 @@ pub fn copy_database(source: &Path, target: &Path) -> Result<()> {
     )
     .with_context(|| format!("open index {}", source.display()))?;
     configure(&connection)?;
-    let target = target.to_str().context("index path must be valid UTF-8")?;
+    let target_text = target.to_str().context("index path must be valid UTF-8")?;
     connection
-        .execute("VACUUM INTO ?1", [target])
+        .execute("VACUUM INTO ?1", [target_text])
         .context("copy index database")?;
-    Ok(())
+    drop(connection);
+    // A copy seeds rebuildable snapshots only: it never carries memories. A
+    // copy that cannot be scrubbed is removed rather than left behind.
+    scrub_memory(target).inspect_err(|_| {
+        let _ = std::fs::remove_file(target);
+    })
 }
 
-/// Reject state paths redirected through symlinks, including an existing database.
+/// Remove any project-memory rows from an index database that is not the
+/// user's (an impact snapshot), zeroing the freed pages.
+pub fn scrub_memory(database: &Path) -> Result<()> {
+    let mut connection = Connection::open_with_flags(
+        database,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .with_context(|| format!("open index copy {}", database.display()))?;
+    configure(&connection)?;
+    durable::scrub_memory(&mut connection).context("remove memories from index copy")
+}
+
+/// Reject index and memory state paths redirected through symlinks,
+/// including existing databases and their SQLite side files.
 pub fn validate_state_path(root: &Path) -> Result<()> {
     for path in [
         root.join(".code-intel"),
@@ -948,12 +976,25 @@ pub fn validate_state_path(root: &Path) -> Result<()> {
         root.join(".code-intel/index.db-journal"),
         root.join(".code-intel/index.db-wal"),
         root.join(".code-intel/index.db-shm"),
+        root.join(MEMORY_DIR),
+        root.join(MEMORY_FILE),
+        root.join(".repogi/memory.db-journal"),
+        root.join(".repogi/memory.db-wal"),
+        root.join(".repogi/memory.db-shm"),
     ] {
         match std::fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => bail!(
-                "refusing symlinked index state {}; use a local .code-intel directory",
-                path.display()
-            ),
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if path.starts_with(root.join(MEMORY_DIR)) {
+                    bail!(
+                        "refusing symlinked memory state {}; use a local .repogi directory",
+                        path.display()
+                    )
+                }
+                bail!(
+                    "refusing symlinked index state {}; use a local .code-intel directory",
+                    path.display()
+                )
+            }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {

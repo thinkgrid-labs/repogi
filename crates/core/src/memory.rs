@@ -300,6 +300,132 @@ pub struct EventRecord {
     pub detail: Option<BTreeMap<String, String>>,
 }
 
+/// BLAKE3 over the claim fields and every evidence snapshot: approving a
+/// digest approves exactly that claim and that evidence.
+#[must_use]
+pub fn revision_digest(
+    memory_type: MemoryType,
+    title: &str,
+    claim: &str,
+    assertion: Option<&Assertion>,
+    evidence: &[EvidenceSnapshot],
+) -> String {
+    let canonical = serde_json::to_vec(&(memory_type, title, claim, assertion, evidence))
+        .expect("memory revision serializes");
+    blake3::hash(&canonical).to_hex().to_string()
+}
+
+/// One memory exactly as stored: every column of every row, with JSON bodies
+/// kept as the stored text. Migration and backups copy these verbatim, so a
+/// round trip is checked byte for byte rather than through re-serialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredMemory {
+    pub id: String,
+    pub memory_type: String,
+    pub status: String,
+    pub latest_revision: u32,
+    pub approved_revision: Option<u32>,
+    pub pending_revision: Option<u32>,
+    pub superseded_by: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: u64,
+    pub revisions: Vec<StoredRevision>,
+    /// Oldest first. Sequences are store-local; only their order is portable.
+    pub events: Vec<StoredEvent>,
+    /// The FTS row of each revision, in revision order.
+    pub search: Vec<StoredSearch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredRevision {
+    pub revision: u32,
+    pub state: String,
+    pub digest: String,
+    pub claim_key: String,
+    pub assertion_subject: Option<String>,
+    pub assertion_status: Option<String>,
+    /// `RevisionRecord` JSON.
+    pub data: String,
+    pub evidence: Vec<StoredEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredEvidence {
+    pub ordinal: u32,
+    pub role: String,
+    pub class: String,
+    pub subject_id: String,
+    pub explicit_id: Option<String>,
+    pub target_id: Option<String>,
+    pub path: String,
+    /// `EvidenceSnapshot` JSON.
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredEvent {
+    pub sequence: u64,
+    pub revision: Option<u32>,
+    pub action: String,
+    /// `EventRecord` JSON.
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredSearch {
+    pub revision: u32,
+    pub title: String,
+    pub claim: String,
+    pub subjects: String,
+}
+
+impl StoredMemory {
+    /// The same memory with event sequences cleared, for comparisons across
+    /// stores (sequences are allocated per store).
+    #[must_use]
+    pub fn portable(&self) -> Self {
+        let mut copy = self.clone();
+        for event in &mut copy.events {
+            event.sequence = 0;
+        }
+        copy
+    }
+}
+
+/// BLAKE3 over stored memories in the given order (callers sort by ID).
+/// `portable` ignores store-local event sequences.
+#[must_use]
+pub fn stored_digest(memories: &[StoredMemory], portable: bool) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for memory in memories {
+        let bytes = if portable {
+            serde_json::to_vec(&memory.portable())
+        } else {
+            serde_json::to_vec(memory)
+        }
+        .expect("stored memory serializes");
+        hasher.update(&(bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+/// The FTS `subjects` text of a revision: explicit IDs and cited paths, then
+/// the assertion subject.
+#[must_use]
+pub fn search_subjects(evidence: &[EvidenceSnapshot], assertion: Option<&Assertion>) -> String {
+    let mut subjects: Vec<&str> = Vec::new();
+    for item in evidence {
+        subjects.extend(item.explicit_id.as_deref());
+        subjects.push(&item.citation.path);
+    }
+    if let Some(assertion) = assertion {
+        subjects.push(&assertion.subject);
+    }
+    subjects.join(" ")
+}
+
 /// Normalized type and claim, for duplicate detection only.
 #[must_use]
 pub fn claim_key(memory_type: MemoryType, claim: &str) -> String {

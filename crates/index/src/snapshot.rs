@@ -16,16 +16,17 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use code_intel_core::{Diagnostic, IndexReport, semantic::SEMANTIC_IR_VERSION};
-use code_intel_store::{Store, copy_database};
+use code_intel_store::{Store, copy_database, scrub_memory};
 use serde::Serialize;
 
 use crate::git::{Entry, Git, Revision};
 
 /// Directory names the indexer never descends into (see `discover`).
-const EXCLUDED: [&str; 9] = [
+const EXCLUDED: [&str; 10] = [
     "node_modules",
     ".git",
     ".code-intel",
+    ".repogi",
     "dist",
     "build",
     "coverage",
@@ -119,6 +120,7 @@ impl Cache {
             identity: identity.to_path_buf(),
             key: crate::build_key()?,
         };
+        cache.scrub()?;
         cache.evict()?;
         Ok(cache)
     }
@@ -311,6 +313,25 @@ impl Cache {
     /// A database another snapshot may be seeded from: readable, current IR,
     /// recorded for this repository root. (A different build's database is
     /// still a valid seed: snapshot indexing reparses it in full.)
+    /// Snapshots seeded by older builds copied the user's memory tables; a
+    /// cache must never be a second memory store, so remove any such rows.
+    fn scrub(&self) -> Result<()> {
+        let mut databases = vec![self.dir.join("worktree/index.db")];
+        for entry in fs::read_dir(self.dir.join("trees"))? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                databases.push(entry.path().join("index.db"));
+            }
+        }
+        for database in databases {
+            // An unreadable entry is never reused (validation rebuilds it).
+            if fs::symlink_metadata(&database).is_ok_and(|meta| meta.is_file()) {
+                let _ = scrub_memory(&database);
+            }
+        }
+        Ok(())
+    }
+
     fn seedable(&self, seed: &Path) -> bool {
         seed.is_file()
             && Store::open_read(seed).is_ok_and(|store| {
