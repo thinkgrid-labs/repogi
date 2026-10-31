@@ -658,16 +658,16 @@ pub fn dependencies(
     )
 }
 
-struct Walk {
-    depths: BTreeMap<String, usize>,
-    order: Vec<String>,
-    links: Vec<Link>,
-    unresolved: Vec<Site>,
-    limit_reached: bool,
+pub(crate) struct Walk {
+    pub depths: BTreeMap<String, usize>,
+    pub order: Vec<String>,
+    pub links: Vec<Link>,
+    pub unresolved: Vec<Site>,
+    pub limit_reached: bool,
 }
 
 /// Breadth-first over resolved typed edges; discovery order is the ordinal order.
-fn walk(
+pub(crate) fn walk(
     store: &Store,
     root: &str,
     options: &DependencyOptions,
@@ -777,7 +777,7 @@ fn walk(
     })
 }
 
-fn kind_names(kinds: &[Relationship]) -> Result<Vec<String>> {
+pub(crate) fn kind_names(kinds: &[Relationship]) -> Result<Vec<String>> {
     ensure!(!kinds.is_empty(), "kinds must not be empty");
     kinds
         .iter()

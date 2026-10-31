@@ -1,6 +1,6 @@
 # Knowledge relationships
 
-Knowledge Relationships is an internal development milestone (v0.3), not a published release. It extends the local Markdown foundation with explicit requirements, architecture decisions and source-backed links. The workspace version remains 0.1.0. Public release preparation is deferred until the investigation and persistent-memory milestones have been validated and publication is explicitly approved.
+Knowledge Relationships is an internal development milestone (v0.3), not a published release. It extends the local Markdown foundation with explicit requirements, architecture decisions and source-backed links. The workspace version remains 0.1.0. Public release preparation is deferred until the persistent-memory milestone has been validated and publication is explicitly approved. [Agent investigation](AGENT_INVESTIGATION.md) (v0.4) consumes these relationships one explicit hop at a time; it does not change their semantics.
 
 A validated target means that an explicit reference identifies indexed evidence. It does **not** establish that code implements a requirement, satisfies acceptance criteria, or behaves correctly. Repository text remains untrusted data. Repogi never follows document instructions or fetches remote links.
 

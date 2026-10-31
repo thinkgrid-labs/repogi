@@ -29,19 +29,21 @@ pub const ALL_TOOLS: [&str; 5] = [
     "atlas_status",
 ];
 
-/// Every tool `--tools` can select. Impact and knowledge trace are opt-in:
-/// no profile lists it, so default clients see no new schema.
-pub const SELECTABLE_TOOLS: [&str; 7] = [
+/// Every tool `--tools` can select. Impact, knowledge trace and investigation
+/// are opt-in: no profile lists them, so default clients see no new schema.
+pub const SELECTABLE_TOOLS: [&str; 8] = [
     "atlas_context",
     "atlas_symbol",
     "atlas_references",
     "atlas_dependencies",
     "atlas_impact",
     "atlas_knowledge_trace",
+    "atlas_investigate",
     "atlas_status",
 ];
 
 const IMPACT_DEFAULT_BYTES: usize = 8000;
+const INVESTIGATE_DEFAULT_BYTES: usize = code_intel_retrieval::investigate::DEFAULT_BYTES;
 const IMPACT_MIN_BYTES: usize = 2000;
 const MAX_REVISION: usize = 256;
 const MAX_TEST_DIRS: usize = 16;
@@ -203,6 +205,9 @@ impl Server {
         if self.tools.contains(&"atlas_knowledge_trace") {
             text.push_str(" atlas_knowledge_trace follows explicit source claims; validated target identity does not verify implementation correctness.");
         }
+        if self.tools.contains(&"atlas_investigate") {
+            text.push_str(" atlas_investigate returns an advisory, evidence-backed plan of where to start a task; it runs nothing and proves nothing.");
+        }
         if self.tools.contains(&"atlas_references") {
             text.push_str(" atlas_references finds direct users of one declaration.");
         }
@@ -241,6 +246,13 @@ impl Server {
     ) -> Option<ToolOutput> {
         let response_budget = if name == "atlas_status" {
             MAX_BYTES
+        } else if name == "atlas_investigate" {
+            arguments
+                .get("max_bytes")
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| (MIN_BYTES..=MAX_BYTES).contains(value))
+                .unwrap_or(INVESTIGATE_DEFAULT_BYTES)
         } else if name == "atlas_impact" {
             arguments
                 .get("max_bytes")
@@ -266,6 +278,7 @@ impl Server {
             "atlas_dependencies" => self.dependencies(arguments, register),
             "atlas_impact" => self.impact(arguments, register),
             "atlas_knowledge_trace" => self.knowledge_trace(arguments, register),
+            "atlas_investigate" => self.investigate(arguments, register),
             "atlas_status" => self.status(arguments, register),
             _ => return None,
         };
@@ -452,6 +465,56 @@ impl Server {
         .map_err(|e| ToolError::from_anyhow("knowledge_trace_failed", &e))?;
         code_intel_retrieval::relationships::render(&response, format)
             .map_err(|e| ToolError::from_anyhow("knowledge_trace_failed", &e))
+    }
+
+    fn investigate(&self, arguments: Value, register: &dyn Fn(Interrupt)) -> ToolResult {
+        use code_intel_retrieval::investigate;
+        let args: InvestigateArgs = parse(arguments)?;
+        let max_bytes = match args.max_bytes {
+            None => INVESTIGATE_DEFAULT_BYTES,
+            requested => budget(requested)?,
+        };
+        let format = match args.format.as_deref() {
+            None | Some("agent") => Format::Text,
+            Some("json") => Format::Json,
+            _ => {
+                return Err(ToolError::new(
+                    "invalid_arguments",
+                    "format must be agent or json",
+                ));
+            }
+        };
+        if args.task.len() > investigate::MAX_TASK_BYTES {
+            return Err(ToolError::new(
+                "invalid_arguments",
+                format!("task exceeds {} UTF-8 bytes", investigate::MAX_TASK_BYTES),
+            ));
+        }
+        let selectors = args.selectors.unwrap_or_default();
+        if selectors.len() > investigate::MAX_SELECTORS
+            || selectors.iter().any(|s| s.len() > MAX_TEXT)
+        {
+            return Err(ToolError::new(
+                "invalid_arguments",
+                format!(
+                    "at most {} selectors of up to {MAX_TEXT} bytes",
+                    investigate::MAX_SELECTORS
+                ),
+            ));
+        }
+        let (store, _) = self.open(args.root.as_deref(), register)?;
+        let request = investigate::Request {
+            task: args.task,
+            selectors,
+            depth: args.depth.unwrap_or(investigate::DEFAULT_DEPTH),
+            max_steps: args.max_steps.unwrap_or(investigate::DEFAULT_STEPS),
+            max_bytes,
+            ranking: investigate::Ranking::Balanced,
+        };
+        let response = investigate::investigate(&store, &request, format)
+            .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))?;
+        investigate::render(&response, format)
+            .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))
     }
 
     fn context(&self, arguments: Value, register: &dyn Fn(Interrupt)) -> ToolResult {
@@ -1307,6 +1370,18 @@ struct KnowledgeTraceArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct InvestigateArgs {
+    task: String,
+    selectors: Option<Vec<String>>,
+    depth: Option<usize>,
+    max_steps: Option<usize>,
+    max_bytes: Option<usize>,
+    format: Option<String>,
+    root: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StatusArgs {
     root: Option<String>,
     check_freshness: Option<bool>,
@@ -1331,6 +1406,7 @@ struct Kit {
 }
 
 impl Kit {
+    #[allow(clippy::too_many_lines)] // One definition arm per selectable tool.
     fn tool(&self, name: &str) -> Value {
         let (title, description, properties, required): (&str, &str, Value, &[&str]) = match name {
             "atlas_context" => (
@@ -1354,6 +1430,12 @@ impl Kit {
                 "Trace explicit requirements, decisions and source links. Validated targets do not verify implementation. Read-only; requires explicit indexing.",
                 json!({"selector":{"type":"string","maxLength":1024},"depth":{"type":"integer","minimum":0,"maximum":8,"default":2}}),
                 &["selector"],
+            ),
+            "atlas_investigate" => (
+                "Atlas: task investigation",
+                "Advisory plan for a task: ordered steps naming code, requirements, decisions, consumers and test candidates, each citing indexed evidence and uncertainty. Runs nothing; validated claims and static test links prove neither behavior nor coverage.",
+                Self::investigate_properties(),
+                &["task"],
             ),
             "atlas_symbol" => (
                 "Atlas: symbol source",
@@ -1401,6 +1483,9 @@ impl Kit {
             ),
         };
         let mut properties = self.shared(properties, name != "atlas_status");
+        if name == "atlas_investigate" {
+            properties["max_bytes"]["default"] = json!(INVESTIGATE_DEFAULT_BYTES);
+        }
         if name == "atlas_impact" {
             properties["manifest"] = json!({"type":"boolean","description":"Prepare a complete verification artifact descriptor; conflicts with tests/summary/detail/evidence_file. JSON; retrieve bytes with artifact."});
             properties["artifact"] = json!({"type":"object","additionalProperties":false,
@@ -1447,6 +1532,18 @@ impl Kit {
             schema["anyOf"] = json!([{"required":["id"]},{"required":["name"]}]);
         }
         schema
+    }
+
+    fn investigate_properties() -> Value {
+        use code_intel_retrieval::investigate::{
+            DEFAULT_DEPTH, DEFAULT_STEPS, MAX_DEPTH, MAX_SELECTORS, MAX_STEPS, MAX_TASK_BYTES,
+        };
+        json!({
+            "task": {"type":"string","maxLength":MAX_TASK_BYTES},
+            "selectors": {"type":"array","items":{"type":"string","maxLength":MAX_TEXT},"maxItems":MAX_SELECTORS,"description":"Exact entity, REQ-/ADR- or fact IDs to focus on."},
+            "depth": {"type":"integer","minimum":1,"maximum":MAX_DEPTH,"default":DEFAULT_DEPTH},
+            "max_steps": {"type":"integer","minimum":1,"maximum":MAX_STEPS,"default":DEFAULT_STEPS},
+        })
     }
 
     fn impact_description(&self) -> &'static str {

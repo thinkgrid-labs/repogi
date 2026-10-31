@@ -36,3 +36,5 @@ Document context returns query-centered excerpts with original section provenanc
 ## Opt-in knowledge relationships
 
 Add `atlas_knowledge_trace` to `--tools` to trace explicit requirement or ADR identifiers. It is absent from both default profiles. Arguments are `selector`, optional configured `root`, `depth` (0–8), `max_bytes` (256–32000) and `format` (`agent` or `json`). The tool returns source citations, target validation states, freshness and completeness. It never indexes implicitly or treats a documented implementation claim as verified behavior. See [knowledge relationships](KNOWLEDGE_RELATIONSHIPS.md).
+
+Add `atlas_investigate` to `--tools` for an advisory, evidence-backed investigation plan from a task description. It is absent from both default profiles; listing it adds one tool definition and one instruction sentence. Arguments are `task`, optional `selectors` (up to 8 exact entity, `REQ-`/`ADR-` or fact IDs), `depth` (1–3), `max_steps` (1–16), `max_bytes` (256–32000, default 12000), `format` (`agent` or `json`) and the usual `root`. It never indexes, executes project code or tests, or writes state. See [agent investigation](AGENT_INVESTIGATION.md).

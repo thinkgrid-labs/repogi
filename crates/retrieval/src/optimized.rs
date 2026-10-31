@@ -133,7 +133,10 @@ pub(super) fn context(
     )
 }
 
-fn lexical(store: &Store, terms: &[String]) -> Result<(BTreeMap<String, Candidate>, bool)> {
+pub(super) fn lexical(
+    store: &Store,
+    terms: &[String],
+) -> Result<(BTreeMap<String, Candidate>, bool)> {
     let expression = terms
         .iter()
         .map(|term| format!("\"{term}\"*"))

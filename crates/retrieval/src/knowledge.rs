@@ -44,7 +44,7 @@ pub fn expression(query: &str) -> Result<String> {
 
 /// Prefer sections covering every literal term before partial-word matches.
 /// Both passes use the same read snapshot and retain a shared candidate cap.
-fn ranked_documents(store: &Store, query: &str, limit: u32) -> Result<Vec<DocumentHit>> {
+pub(super) fn ranked_documents(store: &Store, query: &str, limit: u32) -> Result<Vec<DocumentHit>> {
     let expression = expression(query)?;
     let conjunction = expression.replace(" OR ", " AND ");
     let mut hits = store.search_documents(&conjunction, limit)?;

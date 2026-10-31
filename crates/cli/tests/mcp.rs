@@ -1444,3 +1444,61 @@ fn knowledge_trace_is_opt_in_root_confined_bounded_and_read_only() {
     }
     assert_eq!(before, fs::read(root.join(".code-intel/index.db")).unwrap());
 }
+
+#[test]
+fn investigation_is_opt_in_root_confined_bounded_and_read_only() {
+    let (_temp, root) = fixture("agent-investigation");
+    let (_other_temp, other) = fixture("knowledge");
+    let before = fs::read(root.join(".code-intel/index.db")).unwrap();
+    let mut defaults = Server::ready(&[&root]);
+    let listed = defaults.request(1, "tools/list", json!({}));
+    assert!(
+        !listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "atlas_investigate")
+    );
+    let mut server = Server::ready_with(&[&root], &["--tools", "atlas_investigate"]);
+    let listed = server.request(1, "tools/list", json!({}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
+    assert_eq!(tools[0]["inputSchema"]["required"], json!(["task"]));
+    assert_eq!(
+        tools[0]["inputSchema"]["properties"]["max_bytes"]["default"],
+        12_000
+    );
+    let text = server.ok(
+        "atlas_investigate",
+        json!({"task":"Modify session expiration","max_bytes":12000}),
+    );
+    assert!(text.starts_with("Investigation r1"), "{text}");
+    assert!(text.len() <= 12_000);
+    assert!(text.contains("src/auth/session.ts"));
+    assert!(!text.contains("rm -rf"));
+    let text = server.ok(
+        "atlas_investigate",
+        json!({"task":"What implements REQ-AUTH-001?","format":"json","max_bytes":16000,"max_steps":4,"depth":1}),
+    );
+    let response: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(response["budget"]["used_bytes"], text.len());
+    assert_eq!(response["task"]["selectors"], json!(["REQ-AUTH-001"]));
+    assert!(response["steps"].as_array().unwrap().len() <= 4);
+    for arguments in [
+        json!({"task":"session","root":other}),
+        json!({"task":"session","root":"relative"}),
+        json!({"task":"session","depth":9}),
+        json!({"task":"session","max_steps":0}),
+        json!({"task":"session","max_bytes":64000}),
+        json!({"task":"session","execute":true}),
+        json!({"task":"session","format":"yaml"}),
+        json!({"task":"x".repeat(9000)}),
+        json!({"task":"session","selectors":vec!["REQ-1"; 9]}),
+        json!({"task":"session","max_bytes":300}),
+    ] {
+        assert!(server.call("atlas_investigate", arguments).1);
+    }
+    assert_eq!(before, fs::read(root.join(".code-intel/index.db")).unwrap());
+    assert!(!other.join(".code-intel/impact").exists());
+}
