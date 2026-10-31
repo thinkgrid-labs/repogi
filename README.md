@@ -307,7 +307,7 @@ Nothing. Memories live in `.repogi/memory.db`. Without an index they still read,
 
 ## Roadmap
 
-Next come the 0.1.1 release, a reproducible evaluation with real coding agents, and language support beyond TypeScript, starting with JavaScript. The [public roadmap](ROADMAP.md) lists priorities, acceptance criteria, what is deliberately deferred and where contributions help most.
+Next come the 0.1.1 release, a reproducible evaluation with real coding agents, and language support beyond TypeScript, starting with JavaScript. The [public roadmap](ROADMAP.md) lists priorities, status and completion criteria.
 
 ## Documentation and contributing
 

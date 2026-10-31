@@ -127,7 +127,12 @@ mod unix {
             disk::write(root.path().join("policy.md"), "original").unwrap();
             let (parent, name) = parent(&root_path, Path::new("policy.md")).unwrap();
             disk::remove_file(root.path().join("policy.md")).unwrap();
-            fs::mkfifoat(&parent, &name, Mode::RUSR | Mode::WUSR).unwrap();
+            // rustix has no mkfifoat on Apple targets; mkfifo(1) is POSIX.
+            let created = std::process::Command::new("mkfifo")
+                .arg(root_path.join("policy.md"))
+                .status()
+                .unwrap();
+            assert!(created.success());
             let file = leaf(&parent, &name).unwrap();
             assert!(!file.metadata().unwrap().is_file());
             assert!(crate::source::open(&root_path, "policy.md").is_err());
