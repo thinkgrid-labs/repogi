@@ -376,6 +376,45 @@ impl Server {
             })
     }
 
+    /// The memory store of a configured root, read-only (never created or
+    /// migrated), with its code index when one exists. Without either, the
+    /// root has no Repogi state at all and `index_missing` is reported.
+    fn open_memory(
+        &self,
+        requested: Option<&str>,
+        register: &dyn Fn(Interrupt),
+    ) -> std::result::Result<(code_intel_store::MemoryStore, Option<Store>), ToolError> {
+        let root = self.root(requested)?;
+        if !root.join(".code-intel/index.db").is_file() {
+            if root.canonicalize().ok().as_deref() != Some(root) {
+                return Err(ToolError::new(
+                    "root_not_allowed",
+                    "configured root was moved or redirected; restart with its current canonical path",
+                ));
+            }
+            validate_state_path(root)
+                .map_err(|error| ToolError::from_anyhow("state_rejected", &error))?;
+            let memory = code_intel_store::MemoryStore::open_read(root)
+                .map_err(|e| ToolError::from_anyhow("memory_failed", &e))?;
+            if memory.source() == code_intel_store::MemorySource::Empty {
+                return Err(ToolError::new(
+                    "index_missing",
+                    format!(
+                        "no Atlas index or project memory for {0}; run `repogi index {0}` (offline; never executes repository code)",
+                        root.display()
+                    ),
+                ));
+            }
+            register(memory.interrupt_handle());
+            return Ok((memory, None));
+        }
+        let (index, root) = self.open(requested, register)?;
+        let memory = code_intel_store::MemoryStore::open_read(root)
+            .map_err(|e| ToolError::from_anyhow("memory_failed", &e))?;
+        register(memory.interrupt_handle());
+        Ok((memory, Some(index)))
+    }
+
     fn open(
         &self,
         requested: Option<&str>,
@@ -521,7 +560,16 @@ impl Server {
                 ),
             ));
         }
-        let (store, _) = self.open(args.root.as_deref(), register)?;
+        let (store, root) = self.open(args.root.as_deref(), register)?;
+        // Read-only: never created, migrated or written from MCP.
+        let memory = if args.include_memory == Some(true) {
+            let memory = code_intel_store::MemoryStore::open_read(root)
+                .map_err(|e| ToolError::from_anyhow("memory_failed", &e))?;
+            register(memory.interrupt_handle());
+            Some(memory)
+        } else {
+            None
+        };
         let request = investigate::Request {
             task: args.task,
             selectors,
@@ -531,8 +579,9 @@ impl Server {
             ranking: investigate::Ranking::Balanced,
             include_memory: args.include_memory.unwrap_or(false),
         };
-        let response = investigate::investigate(&store, &request, format)
-            .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))?;
+        let response =
+            investigate::investigate_with_memory(&store, memory.as_ref(), &request, format)
+                .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))?;
         investigate::render(&response, format)
             .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))
     }
@@ -601,12 +650,16 @@ impl Server {
             "history" => only(&["id", "limit"])?,
             _ => return Err(invalid("operation must be search, get, list or history")),
         }
-        let (store, _) = self.open(args.root.as_deref(), register)?;
+        let (memory_store, index) = self.open_memory(args.root.as_deref(), register)?;
+        let store = code_intel_retrieval::memory::Stores {
+            memory: &memory_store,
+            index: index.as_ref(),
+        };
         match args.operation.as_str() {
             "search" => {
                 let query = args.query.ok_or_else(|| invalid("search needs `query`"))?;
                 let mut response = memory::search(
-                    &store,
+                    store,
                     &query,
                     statuses,
                     args.include_unreviewed.unwrap_or(false),
@@ -617,16 +670,16 @@ impl Server {
             }
             "get" => {
                 let id = args.id.ok_or_else(|| invalid("get needs `id`"))?;
-                let mut response = memory::show(&store, &id).map_err(failed)?;
+                let mut response = memory::show(store, &id).map_err(failed)?;
                 memory::render(&mut response, format, max_bytes).map_err(failed)
             }
             "history" => {
                 let id = args.id.ok_or_else(|| invalid("history needs `id`"))?;
-                let mut response = memory::history(&store, &id, limit).map_err(failed)?;
+                let mut response = memory::history(store, &id, limit).map_err(failed)?;
                 memory::render(&mut response, format, max_bytes).map_err(failed)
             }
             _ => {
-                let mut response = memory::list(&store, statuses, memory_type, args.after, limit)
+                let mut response = memory::list(store, statuses, memory_type, args.after, limit)
                     .map_err(failed)?;
                 memory::render(&mut response, format, max_bytes).map_err(failed)
             }
@@ -1227,19 +1280,18 @@ fn budget(requested: Option<usize>) -> std::result::Result<usize, ToolError> {
 }
 
 fn indexed_path(store: &Store, path: Option<&str>) -> std::result::Result<(), ToolError> {
-    if let Some(path) = path {
-        if store
+    if let Some(path) = path
+        && store
             .file_hash(path)
             .map_err(|error| ToolError::from_anyhow("index_unreadable", &error))?
             .is_none()
-        {
-            return Err(ToolError::new(
-                "path_not_indexed",
-                format!(
-                    "{path:?} is not in this index (possibly excluded, missing or skipped); use native Read/Grep; this is not proof that the file contains no matches"
-                ),
-            ));
-        }
+    {
+        return Err(ToolError::new(
+            "path_not_indexed",
+            format!(
+                "{path:?} is not in this index (possibly excluded, missing or skipped); use native Read/Grep; this is not proof that the file contains no matches"
+            ),
+        ));
     }
     Ok(())
 }

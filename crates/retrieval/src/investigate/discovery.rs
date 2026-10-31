@@ -513,12 +513,11 @@ impl Investigation<'_> {
                     self.knowledge_target(&owner, 1, rank);
                     self.ledger.support(&owner.id, evidence.clone());
                     // Corroboration only: the governing entity did not match the task.
-                    if let Some(code) = self.found.code.get_mut(&id) {
-                        if let Some(evidence) = evidence
-                            && !code.evidence.contains(&evidence)
-                        {
-                            code.evidence.push(evidence);
-                        }
+                    if let Some(code) = self.found.code.get_mut(&id)
+                        && let Some(evidence) = evidence
+                        && !code.evidence.contains(&evidence)
+                    {
+                        code.evidence.push(evidence);
                     }
                 }
             }

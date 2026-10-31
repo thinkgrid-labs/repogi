@@ -25,7 +25,7 @@ EXCLUDED = {
     'examples/ci/verification-manifest-hosted.yml.example',
 }
 PRIVATE_PARTS = {
-    '.git', 'target', 'benchmarks', '.code-intel', '__pycache__',
+    '.git', 'target', 'benchmarks', '.code-intel', '.repogi', '__pycache__',
     'internal', 'sessions', 'recordings', 'evaluations',
 }
 

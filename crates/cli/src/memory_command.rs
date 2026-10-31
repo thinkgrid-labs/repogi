@@ -1,16 +1,23 @@
-//! `repogi memory`: reviewed project memory for the repository that owns the
-//! nearest index. Reads open the index read-only and never migrate; writes
-//! open it read-write only for that command and never migrate either.
+//! `repogi memory`: reviewed project memory for the nearest repository that
+//! has a code index (`.code-intel/index.db`) or a memory store
+//! (`.repogi/memory.db`). Memories live in the durable memory store; the code
+//! index is only read, to capture and verify evidence, and is optional for
+//! reads. Reads never create, migrate or write anything. Writes open the
+//! memory store for that command only (creating it, or migrating memories out
+//! of a schema-5 index first) and never write the code index's own data.
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
-use code_intel_core::memory::{MemoryStatus, MemoryType};
+use code_intel_core::memory::{MemoryStatus, MemoryType, utc_now};
 use code_intel_retrieval::{
     Format,
-    memory::{self, Draft, Selector},
+    memory::{self, Draft, ImportMode, Selector, Stores},
 };
-use code_intel_store::{Decision, Store, validate_state_path};
+use code_intel_store::{
+    Decision, MEMORY_FILE, MemoryStore, MigrationReport, Store, validate_state_path,
+};
 
 use crate::OutputFormat;
 
@@ -165,6 +172,61 @@ pub enum MemoryCommand {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
+    /// Where memories are stored, store identity and history (read-only).
+    Status {
+        /// Also run SQLite integrity and foreign-key checks.
+        #[arg(long)]
+        check: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Copy memories out of a schema-5 `.code-intel/index.db` into
+    /// `.repogi/memory.db` (idempotent; the index rows are kept and frozen).
+    Migrate {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Write every memory, revision, evidence snapshot and review event to a
+    /// portable JSON backup (read-only for the store). May contain sensitive
+    /// project knowledge.
+    Export {
+        /// The file to create; refused if it exists unless --force.
+        #[arg(long)]
+        output: PathBuf,
+        /// Replace an existing output file.
+        #[arg(long)]
+        force: bool,
+        /// Export format (only `json`).
+        #[arg(long = "export-format", default_value = "json", value_parser = ["json"])]
+        export_format: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Validate a backup and import it in one transaction. A backup of this
+    /// store's lineage is restored; any other is imported for local review.
+    Import {
+        file: PathBuf,
+        /// Assert the backup is this repository's own memory: keep its review
+        /// states (only into an empty or same-lineage store).
+        #[arg(long)]
+        restore: bool,
+        /// Validate and report without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Label for the import event (default: `REPOGI_MEMORY_AUTHOR` or "unspecified").
+        #[arg(long)]
+        actor: Option<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Rebind a moved repository's memory store to its new location.
+    Rebind {
+        /// The root the store records (exactly as printed by the refusal).
+        #[arg(long)]
+        from: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Args)]
@@ -277,24 +339,100 @@ fn author(flag: Option<String>) -> String {
         .unwrap_or_else(|| "unspecified".into())
 }
 
-/// The nearest ancestor that owns an index, with its database path.
-fn nearest() -> Result<(PathBuf, PathBuf)> {
+/// The nearest ancestor with a code index or a memory store.
+fn nearest() -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("read current directory")?;
     for root in Path::new(&cwd).ancestors() {
         validate_state_path(root)?;
-        let database = root.join(".code-intel/index.db");
-        if database.exists() {
-            return Ok((root.to_path_buf(), database));
+        if root.join(".code-intel/index.db").exists() || root.join(MEMORY_FILE).exists() {
+            return Ok(root.to_path_buf());
         }
     }
     bail!(
-        "no .code-intel/index.db found in current directory or ancestors; run `repogi index <path>` first"
+        "no .code-intel/index.db or .repogi/memory.db found in current directory or ancestors; run `repogi index <path>` first"
     )
 }
 
-fn writer() -> Result<Store> {
-    let (root, database) = nearest()?;
-    Store::open_memory_writer(&database, &root)
+/// The code index of `root`, read-only, when it exists; refused when it was
+/// built for another root (a copied index).
+fn index_of(root: &Path) -> Result<Option<Store>> {
+    let database = root.join(".code-intel/index.db");
+    if !database.exists() {
+        return Ok(None);
+    }
+    let store = Store::open_read(&database)?;
+    anyhow::ensure!(
+        store.root()?.as_deref() == root.to_str(),
+        "index belongs to a different repository root; run `repogi index <path>` for this repository"
+    );
+    Ok(Some(store))
+}
+
+/// Read-only stores: nothing is created, migrated or written.
+struct Reads {
+    memory: MemoryStore,
+    index: Option<Store>,
+}
+
+impl Reads {
+    fn open() -> Result<Self> {
+        let root = nearest()?;
+        // Memory identity errors come first: they name the irreplaceable state.
+        let memory = MemoryStore::open_read(&root)?;
+        Ok(Self {
+            memory,
+            index: index_of(&root)?,
+        })
+    }
+
+    fn stores(&self) -> Stores<'_> {
+        Stores {
+            memory: &self.memory,
+            index: self.index.as_ref(),
+        }
+    }
+}
+
+/// The durable store for one explicit write (created or migrated first when
+/// needed) and the index for evidence, when present.
+fn writer() -> Result<(MemoryStore, Option<Store>)> {
+    let root = nearest()?;
+    let (memory, migration) = MemoryStore::open_write(&root, &utc_now())?;
+    announce(migration.as_ref());
+    Ok((memory, index_of(&root)?))
+}
+
+fn announce(migration: Option<&MigrationReport>) {
+    if let Some(migration) = migration
+        && migration.outcome != "already_migrated"
+    {
+        eprintln!(
+            "repogi: {} {} memories from .code-intel/index.db into .repogi/memory.db (the index rows are kept, read-only)",
+            migration.outcome, migration.counts.memories
+        );
+    }
+}
+
+fn required(index: Option<&Store>) -> Result<&Store> {
+    index.ok_or_else(|| {
+        code_intel_store::MemoryError {
+            code: "index_required",
+            message: "capturing evidence needs the code index; run `repogi index <path>` first"
+                .into(),
+        }
+        .into()
+    })
+}
+
+fn json_or<T: serde::Serialize>(
+    value: &T,
+    format: OutputFormat,
+    text: impl FnOnce(&T) -> Result<String>,
+) -> Result<String> {
+    match format {
+        OutputFormat::Json => Ok(format!("{}\n", serde_json::to_string(value)?)),
+        OutputFormat::Text => text(value),
+    }
 }
 
 #[allow(clippy::too_many_lines)] // One arm per subcommand, as in `main::run`.
@@ -308,24 +446,24 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             limit,
             output,
         } => {
-            let store = crate::open_nearest()?;
+            let reads = Reads::open()?;
             let (format, max) = output.resolve();
             render(
-                &mut memory::list(&store, statuses, memory_type, after, limit as usize)?,
+                &mut memory::list(reads.stores(), statuses, memory_type, after, limit as usize)?,
                 format,
                 max,
             )
         }
         MemoryCommand::Show { id, output } => {
-            let store = crate::open_nearest()?;
+            let reads = Reads::open()?;
             let (format, max) = output.resolve();
-            render(&mut memory::show(&store, &id)?, format, max)
+            render(&mut memory::show(reads.stores(), &id)?, format, max)
         }
         MemoryCommand::History { id, limit, output } => {
-            let store = crate::open_nearest()?;
+            let reads = Reads::open()?;
             let (format, max) = output.resolve();
             render(
-                &mut memory::history(&store, &id, limit as usize)?,
+                &mut memory::history(reads.stores(), &id, limit as usize)?,
                 format,
                 max,
             )
@@ -337,10 +475,16 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             limit,
             output,
         } => {
-            let store = crate::open_nearest()?;
+            let reads = Reads::open()?;
             let (format, max) = output.resolve();
             render(
-                &mut memory::search(&store, &query, statuses, include_unreviewed, limit as usize)?,
+                &mut memory::search(
+                    reads.stores(),
+                    &query,
+                    statuses,
+                    include_unreviewed,
+                    limit as usize,
+                )?,
                 format,
                 max,
             )
@@ -362,14 +506,18 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             let (format, max) = output.resolve();
             if record {
                 let actor = reviewer(name)?;
-                let mut store = writer()?;
-                let mut verification = memory::verify(&store, &ids, all, limit as usize)?;
+                let (mut store, index) = writer()?;
+                let stores = Stores {
+                    memory: &store,
+                    index: index.as_ref(),
+                };
+                let mut verification = memory::verify(stores, &ids, all, limit as usize)?;
                 memory::record_verification(&mut store, &mut verification, &actor)?;
                 return render(&mut verification, format, max);
             }
-            let store = crate::open_nearest()?;
+            let reads = Reads::open()?;
             render(
-                &mut memory::verify(&store, &ids, all, limit as usize)?,
+                &mut memory::verify(reads.stores(), &ids, all, limit as usize)?,
                 format,
                 max,
             )
@@ -379,10 +527,10 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             limit,
             output,
         } => {
-            let store = crate::open_nearest()?;
+            let reads = Reads::open()?;
             let (format, max) = output.resolve();
             render(
-                &mut memory::conflicts(&store, after, limit as usize)?,
+                &mut memory::conflicts(reads.stores(), after, limit as usize)?,
                 format,
                 max,
             )
@@ -395,9 +543,10 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             author: name,
             format,
         } => {
-            let mut store = writer()?;
+            let (mut store, index) = writer()?;
             let receipt = memory::propose(
                 &mut store,
+                required(index.as_ref())?,
                 &evidence.draft(memory_type, title, claim),
                 &author(name),
             )?;
@@ -414,8 +563,15 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             format,
         } => {
             memory::validate_id(&id)?;
-            let mut store = writer()?;
-            let current = memory::show(&store, &id)?;
+            let (mut store, index) = writer()?;
+            let index = required(index.as_ref())?;
+            let current = memory::show(
+                Stores {
+                    memory: &store,
+                    index: Some(index),
+                },
+                &id,
+            )?;
             let draft = evidence.draft(
                 current.memory.memory_type,
                 title.unwrap_or(current.memory.title),
@@ -423,6 +579,7 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             );
             let receipt = memory::correct(
                 &mut store,
+                index,
                 &id,
                 &draft,
                 &reason,
@@ -433,9 +590,10 @@ pub fn run(command: MemoryCommand) -> Result<String> {
         }
         MemoryCommand::Approve { id, review, note } => {
             let actor = reviewer(review.reviewer)?;
-            let mut store = writer()?;
+            let (mut store, index) = writer()?;
             let receipt = memory::review(
                 &mut store,
+                index.as_ref(),
                 &id,
                 &review.digest,
                 Decision::Approve,
@@ -446,9 +604,10 @@ pub fn run(command: MemoryCommand) -> Result<String> {
         }
         MemoryCommand::Reject { id, review, reason } => {
             let actor = reviewer(review.reviewer)?;
-            let mut store = writer()?;
+            let (mut store, index) = writer()?;
             let receipt = memory::review(
                 &mut store,
+                index.as_ref(),
                 &id,
                 &review.digest,
                 Decision::Reject,
@@ -465,7 +624,7 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             format,
         } => {
             let actor = reviewer(name)?;
-            let mut store = writer()?;
+            let (mut store, _) = writer()?;
             let receipt = memory::supersede(&mut store, &id, &by, &actor, &reason)?;
             memory::render_receipt(&receipt, format_of(format))
         }
@@ -476,9 +635,194 @@ pub fn run(command: MemoryCommand) -> Result<String> {
             format,
         } => {
             let actor = reviewer(name)?;
-            let mut store = writer()?;
+            let (mut store, _) = writer()?;
             let receipt = memory::retire(&mut store, &id, &actor, &reason)?;
             memory::render_receipt(&receipt, format_of(format))
+        }
+        MemoryCommand::Status { check, format } => {
+            let report = memory::status(&nearest()?, check)?;
+            json_or(&report, format, |r| {
+                let mut text = String::new();
+                writeln!(
+                    text,
+                    "Project memory store · {} · {}",
+                    r.location,
+                    r.repository_root.escape_debug()
+                )?;
+                writeln!(
+                    text,
+                    "source {} · schema {} · repository {} · {} memories, {} revisions, {} evidence, {} events{}",
+                    r.store.source,
+                    r.store
+                        .schema_version
+                        .map_or_else(|| "-".into(), |v| v.to_string()),
+                    r.store.repository_id.as_deref().unwrap_or("-"),
+                    r.store.counts.memories,
+                    r.store.counts.revisions,
+                    r.store.counts.evidence,
+                    r.store.counts.events,
+                    r.size_bytes
+                        .map_or_else(String::new, |b| format!(" · {b} bytes")),
+                )?;
+                for event in &r.store.events {
+                    writeln!(
+                        text,
+                        "store event {} {} on {}",
+                        event.sequence, event.action, event.at
+                    )?;
+                }
+                if let Some(problems) = &r.integrity {
+                    if problems.is_empty() {
+                        writeln!(text, "integrity: ok")?;
+                    }
+                    for problem in problems {
+                        writeln!(text, "integrity: {}", problem.escape_debug())?;
+                    }
+                }
+                for note in &r.notes {
+                    writeln!(text, "! {}: {}", note.code, note.detail.escape_debug())?;
+                }
+                Ok(text)
+            })
+        }
+        MemoryCommand::Migrate { format } => {
+            let report = memory::migrate(&nearest()?)?;
+            json_or(&report, format, |r| {
+                let mut text = format!("memory migration: {}\n", r.outcome);
+                if let Some(m) = &r.migration {
+                    writeln!(
+                        text,
+                        "{} memories, {} revisions, {} evidence, {} events · source digest {} · {} written · legacy frozen: {}",
+                        m.counts.memories,
+                        m.counts.revisions,
+                        m.counts.evidence,
+                        m.counts.events,
+                        m.source_digest,
+                        m.written,
+                        m.legacy_frozen
+                    )?;
+                    for note in &m.notes {
+                        writeln!(text, "! {}", note.escape_debug())?;
+                    }
+                }
+                Ok(text)
+            })
+        }
+        MemoryCommand::Export {
+            output,
+            force,
+            export_format: _,
+            format,
+        } => {
+            let reads = Reads::open()?;
+            let export = memory::export(reads.stores())?;
+            let mut bytes = serde_json::to_vec_pretty(&export)?;
+            bytes.push(b'\n');
+            memory::write_file(&output, &bytes, force)?;
+            let summary = serde_json::json!({
+                "schema_version": 1,
+                "kind": "memory_export",
+                "output": output.display().to_string(),
+                "bytes": bytes.len(),
+                "counts": export.counts,
+                "source": export.source,
+                "integrity": export.integrity,
+                "notice": memory::backup_notice(),
+            });
+            json_or(&summary, format, |_| {
+                Ok(format!(
+                    "exported {} memories ({} revisions, {} evidence, {} events) to {}\nintegrity blake3 {}\n! {}\n",
+                    export.counts.memories,
+                    export.counts.revisions,
+                    export.counts.evidence,
+                    export.counts.events,
+                    output.display().to_string().escape_debug(),
+                    export.integrity.digest,
+                    memory::backup_notice()
+                ))
+            })
+        }
+        MemoryCommand::Import {
+            file,
+            restore,
+            dry_run,
+            actor,
+            format,
+        } => {
+            let root = nearest()?;
+            let export = memory::read_export(&file)?;
+            let report = memory::import(
+                &root,
+                &export,
+                if restore {
+                    ImportMode::Restore
+                } else {
+                    ImportMode::Auto
+                },
+                &author(actor),
+                dry_run,
+            )?;
+            json_or(&report, format, |r| {
+                let mut text = format!(
+                    "memory import ({}{}) · export {} · {}\n",
+                    r.mode,
+                    if r.dry_run {
+                        ", dry run: nothing written"
+                    } else {
+                        ""
+                    },
+                    &r.export_digest[..16],
+                    r.outcomes
+                        .iter()
+                        .map(|(k, v)| format!("{k} {v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                for line in r.memories.iter().take(200) {
+                    writeln!(
+                        text,
+                        "{} -> {} · {}{}{}",
+                        line.result.source_memory,
+                        line.result.local_memory.as_deref().unwrap_or("-"),
+                        line.result.outcome,
+                        line.verification
+                            .map_or_else(String::new, |s| format!(" · evidence {}", s.label())),
+                        line.result
+                            .detail
+                            .as_deref()
+                            .map_or_else(String::new, |d| format!(" · {}", d.escape_debug()))
+                    )?;
+                }
+                if r.memories.len() > 200 {
+                    writeln!(
+                        text,
+                        "… {} more (use --format json)",
+                        r.memories.len() - 200
+                    )?;
+                }
+                for note in &r.notes {
+                    writeln!(text, "! {}: {}", note.code, note.detail.escape_debug())?;
+                }
+                Ok(text)
+            })
+        }
+        MemoryCommand::Rebind { from, format } => {
+            let root = nearest()?;
+            let id = code_intel_store::rebind_memory(&root, &from, &utc_now())?;
+            let report = serde_json::json!({
+                "schema_version": 1,
+                "kind": "memory_rebind",
+                "repository_id": id,
+                "from": from,
+                "to": root.display().to_string(),
+            });
+            json_or(&report, format, |_| {
+                Ok(format!(
+                    "memory store {id} rebound from {} to {}\n",
+                    from.escape_debug(),
+                    root.display().to_string().escape_debug()
+                ))
+            })
         }
     }
 }

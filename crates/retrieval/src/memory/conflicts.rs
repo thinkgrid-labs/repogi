@@ -7,10 +7,10 @@ use code_intel_core::{
     memory::{EvidenceRole, MemoryStatus},
     relationships::{RelationshipKind, ResolutionStatus},
 };
-use code_intel_store::{MemoryFilter, Store};
+use code_intel_store::{MemoryFilter, MemoryStore, Store};
 use serde::Serialize;
 
-use super::{Header, MAX_CONFLICT_SCAN, Note, State, clean, header, revision, verify};
+use super::{Header, MAX_CONFLICT_SCAN, Note, State, Stores, clean, header, revision, verify};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConflictEvidence {
@@ -55,7 +55,8 @@ pub struct Conflicts {
 }
 
 /// Scan up to `limit` approved memories (in ID order, after `after`).
-pub fn conflicts(store: &Store, after: Option<String>, limit: usize) -> Result<Conflicts> {
+pub fn conflicts(stores: Stores<'_>, after: Option<String>, limit: usize) -> Result<Conflicts> {
+    let store = stores.memory;
     if let Some(after) = &after {
         super::validate_id(after)?;
     }
@@ -70,7 +71,7 @@ pub fn conflicts(store: &Store, after: Option<String>, limit: usize) -> Result<C
         u32::try_from(limit + 1)?,
     )?;
     let more = rows.len() > limit;
-    let mut checker = verify::Checker::new(store)?;
+    let mut checker = verify::Checker::new(stores)?;
     let mut scanned = 0;
     let mut last = None;
     for memory in rows.into_iter().take(limit) {
@@ -98,8 +99,9 @@ pub fn conflicts(store: &Store, after: Option<String>, limit: usize) -> Result<C
                 }]
             };
             if snapshot.kind == "architecture_decision"
+                && let Some(index) = stores.index
                 && let Some(detail) = superseded_decision(
-                    store,
+                    index,
                     &snapshot.subject_id,
                     snapshot.explicit_id.as_deref(),
                 )?
@@ -135,7 +137,7 @@ pub fn conflicts(store: &Store, after: Option<String>, limit: usize) -> Result<C
         }
     }
     Ok(Conflicts {
-        header: header(store, "memory_conflicts")?,
+        header: header(stores, "memory_conflicts")?,
         conflicts: found,
         scanned_memories: scanned,
         scan_limit_reached: more,
@@ -148,7 +150,7 @@ pub fn conflicts(store: &Store, after: Option<String>, limit: usize) -> Result<C
 }
 
 /// Approved memories asserting different statuses for one subject.
-fn assertion_conflicts(store: &Store) -> Result<Vec<Conflict>> {
+fn assertion_conflicts(store: &MemoryStore) -> Result<Vec<Conflict>> {
     let mut found = Vec::new();
     for clash in store.memory_assertion_clashes(64)? {
         found.push(Conflict {

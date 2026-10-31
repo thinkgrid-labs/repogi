@@ -22,7 +22,7 @@ Install the prebuilt repogi executable.
 
 Usage: install.sh [--version VERSION] [--install-dir DIR] [--verify-attestation]
 
-  --version VERSION     Release to install, e.g. 0.1.0 or 0.2.0-preview.1
+  --version VERSION     Release to install, e.g. 0.1.0 or 0.1.1-preview.1
                         (default: latest stable release). Env: REPOGI_VERSION
   --install-dir DIR     Directory for the executable (default: \$HOME/.local/bin).
                         Env: REPOGI_INSTALL_DIR

@@ -79,8 +79,10 @@ pub fn receipt(receipt: &Receipt, format: Format) -> Result<String> {
 fn head(text: &mut String, header: &Header, title: &str) -> Result<()> {
     writeln!(
         text,
-        "{title} · r{} · {}",
-        header.index_revision,
+        "{title} · {} · {}",
+        header
+            .index_revision
+            .map_or_else(|| "no index".to_owned(), |r| format!("r{r}")),
         header
             .repository_root
             .as_deref()
@@ -88,6 +90,7 @@ fn head(text: &mut String, header: &Header, title: &str) -> Result<()> {
             .escape_debug()
     )?;
     writeln!(text, "{}", header.notice)?;
+    notes(text, "", &header.storage)?;
     Ok(())
 }
 
@@ -318,6 +321,27 @@ impl Fit for History {
                 writeln!(text, "   reason: \"{}\"", reason.escape_debug())?;
             }
         }
+        if let Some(source) = &self.imported_from {
+            writeln!(
+                text,
+                "imported from {} ({} there; export {}): source history only, not approval here",
+                source.source_memory.escape_debug(),
+                source.source_status.label(),
+                &source.export_digest[..source.export_digest.len().min(16)]
+            )?;
+            for event in &source.events {
+                writeln!(
+                    text,
+                    "   source event {}{} by {} on {}",
+                    event.action.escape_debug(),
+                    event
+                        .revision
+                        .map_or_else(String::new, |r| format!(" r{r}")),
+                    event.actor.escape_debug(),
+                    event.at.escape_debug()
+                )?;
+            }
+        }
         for event in &self.events {
             write!(
                 text,
@@ -344,6 +368,12 @@ impl Fit for History {
         Ok(text)
     }
     fn shrink(&mut self) -> bool {
+        if let Some(source) = &mut self.imported_from
+            && source.events.pop().is_some()
+        {
+            source.omitted_events += 1;
+            return true;
+        }
         if self.events.pop().is_some() {
             self.omitted_events += 1;
             return true;

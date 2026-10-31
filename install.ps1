@@ -22,7 +22,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 0.1.0
 #>
 [CmdletBinding()]
 param(
-    # Release to install, e.g. 0.1.0 or 0.2.0-preview.1. Default: latest stable release.
+    # Release to install, e.g. 0.1.0 or 0.1.1-preview.1. Default: latest stable release.
     [string]$Version = $env:REPOGI_VERSION,
     # Directory for repogi.exe. Default: %LOCALAPPDATA%\Programs\Repogi\bin.
     [string]$InstallDir = $env:REPOGI_INSTALL_DIR,

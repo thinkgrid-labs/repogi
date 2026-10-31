@@ -286,11 +286,13 @@ fn sections(text: &str) -> BTreeMap<&'static str, BTreeSet<String>> {
             current = Some("possible");
         } else if !line.starts_with(' ') && !line.is_empty() {
             current = None;
-        } else if let (Some(section), Some(row)) = (current, line.strip_prefix("  ")) {
-            if !row.starts_with(' ') && !row.starts_with('…') && row.contains(" [") {
-                let path = row.split(" [").next().unwrap();
-                found.entry(section).or_default().insert(path.into());
-            }
+        } else if let (Some(section), Some(row)) = (current, line.strip_prefix("  "))
+            && !row.starts_with(' ')
+            && !row.starts_with('…')
+            && row.contains(" [")
+        {
+            let path = row.split(" [").next().unwrap();
+            found.entry(section).or_default().insert(path.into());
         }
     }
     found

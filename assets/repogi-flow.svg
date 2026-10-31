@@ -1,67 +1,103 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
-  <title id="title">How Repogi works: a local-first code graph for AI agents</title>
-  <desc id="desc">Flow diagram: TypeScript/TSX repository, Tree-sitter parsing and static binding, SQLite graph with source evidence, code intelligence features including references, dependencies and Git change impact, then CLI and MCP interfaces for AI coding agents. Animated mint dashed edges visualize data flow, and stop when reduced motion is preferred.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="484" viewBox="0 0 1040 484" role="img" aria-labelledby="title desc">
+  <title id="title">How Repogi works</title>
+  <desc id="desc">Source code (TypeScript and TSX) and project knowledge (Markdown, PRDs and ADRs) are indexed into the rebuildable Repogi index at .code-intel/index.db, which holds the static code graph, document search and knowledge relationships. Retrieval reads the index to provide context, trace, investigation and change impact as source-backed, bounded results, exposed to developers and coding agents through the CLI and read-only MCP tools. Project memory is a separate durable store at .repogi/memory.db that survives re-indexing. Memories enter it only through explicit review with the CLI, their evidence is re-verified against the index, and approved memories are optionally recalled by retrieval.</desc>
   <defs>
-    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0D1721"/><stop offset="1" stop-color="#1B2C38"/></linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#B7FFE9"/><stop offset="1" stop-color="#57D8B6"/></linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#66DABB"/></marker>
+    <marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="tip" d="M0 0L8 4L0 8Z"/>
+    </marker>
   </defs>
   <style>
-    .flow { stroke-dasharray: 7 12; animation: run 7s linear infinite; }
-    .ping { animation: ping 4s ease-in-out infinite; } .ping.two { animation-delay:-1.6s; }
-    @keyframes run { to { stroke-dashoffset:-114; } }
-    @keyframes ping { 0%,100% { opacity:.55; } 50% { opacity:1; } }
-    @media (prefers-reduced-motion: reduce) { .flow,.ping { animation:none; } }
-    .step{fill:#152833;stroke:#395D5C;stroke-width:2}.small{fill:#1A303B;stroke:#36585B;stroke-width:1.5}
-    .eyebrow{font:700 15px Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:2.3px;fill:#76DCC4}
-    .headline{font:700 21px Inter,ui-sans-serif,system-ui,sans-serif;fill:#F2FAF7}
-    .detail{font:400 16px Inter,ui-sans-serif,system-ui,sans-serif;fill:#ADC9C8}
-    .feature{font:650 20px Inter,ui-sans-serif,system-ui,sans-serif;fill:#EAF8F3}
-    .caption{font:400 15px Inter,ui-sans-serif,system-ui,sans-serif;fill:#B7D0CE}
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; fill: #1F2328; }
+    .bg { fill: #F6F8FA; stroke: #D1D9E0; }
+    .box { fill: #FFFFFF; stroke: #D1D9E0; }
+    .memory { fill: #EEF8F5; stroke: #0E7C66; }
+    .rule { stroke: #D1D9E0; }
+    .link { fill: none; stroke: #0E7C66; stroke-width: 1.5; }
+    .check { fill: none; stroke: #818B98; stroke-width: 1.5; stroke-dasharray: 2 4; stroke-linecap: round; }
+    .optional { stroke-dasharray: 6 4; }
+    .tip { fill: #0E7C66; }
+    .title { font-size: 17px; font-weight: 600; }
+    .item { font-size: 14px; }
+    .note { font-size: 13px; fill: #59636E; }
+    .path { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 13px; }
+    .tag { font-size: 11px; font-weight: 600; letter-spacing: 1px; fill: #59636E; }
+    .tag.accent, .label { fill: #0E7C66; }
+    .label { font-size: 13px; }
+    @media (prefers-color-scheme: dark) {
+      text { fill: #F0F6FC; }
+      .bg { fill: #0D1117; stroke: #3D444D; }
+      .box { fill: #151B23; stroke: #3D444D; }
+      .memory { fill: #0F2620; stroke: #3FB995; }
+      .rule { stroke: #3D444D; }
+      .link { stroke: #3FB995; }
+      .check { stroke: #9198A1; }
+      .tip { fill: #3FB995; }
+      .note, .tag { fill: #9198A1; }
+      .tag.accent, .label { fill: #3FB995; }
+    }
   </style>
-  <rect x="1" y="1" width="1198" height="538" rx="20" fill="url(#panel)" stroke="#324C52" stroke-width="2"/>
-  <text x="45" y="52" class="eyebrow">HOW REPOGI WORKS</text>
-  <text x="45" y="91" style="font:700 29px Inter,ui-sans-serif,system-ui,sans-serif;fill:#F3FAF7">From source code to traceable answers</text>
-  <g>
-    <rect class="step" x="45" y="134" width="245" height="151" rx="18"/>
-    <rect class="step" x="335" y="134" width="245" height="151" rx="18"/>
-    <rect class="step" x="625" y="134" width="245" height="151" rx="18"/>
-    <rect class="step" x="915" y="134" width="240" height="151" rx="18"/>
-    <circle class="ping" cx="75" cy="168" r="8" fill="#6FE4C4"/>
-    <circle class="ping two" cx="365" cy="168" r="8" fill="#6FE4C4"/>
-    <circle class="ping" cx="655" cy="168" r="8" fill="#6FE4C4"/>
-    <circle class="ping two" cx="945" cy="168" r="8" fill="#6FE4C4"/>
-    <text class="eyebrow" x="94" y="174">01 / SOURCE</text>
-    <text class="eyebrow" x="384" y="174">02 / INDEX</text>
-    <text class="eyebrow" x="674" y="174">03 / GRAPH</text>
-    <text class="eyebrow" x="964" y="174">04 / ACCESS</text>
-    <text class="headline" x="66" y="218">TypeScript / TSX</text>
-    <text class="detail" x="66" y="248">Your local repository</text>
-    <text class="headline" x="356" y="218">Parse + bind</text>
-    <text class="detail" x="356" y="248">Tree-sitter · BLAKE3</text>
-    <text class="headline" x="646" y="218">SQLite graph</text>
-    <text class="detail" x="646" y="248">Typed, sourced edges</text>
-    <text class="headline" x="936" y="218">CLI + MCP</text>
-    <text class="detail" x="936" y="248">Coding agent clients</text>
-  </g>
-  <g fill="none" stroke="#64DDBD" stroke-width="3" marker-end="url(#arrow)">
-    <path d="M291 210H326"/><path d="M581 210H616"/><path d="M871 210H906"/>
-  </g>
-  <g fill="none" stroke="url(#accent)" stroke-width="3" class="flow"><path d="M291 210H326"/><path d="M581 210H616"/><path d="M871 210H906"/></g>
-  <path d="M747 286V315M225 315H988M225 315V340M600 315V340M988 315V340" fill="none" stroke="#5DB7AA" stroke-width="2" opacity=".72"/>
-  <g>
-    <rect class="small" x="45" y="341" width="350" height="92" rx="15"/>
-    <rect class="small" x="425" y="341" width="350" height="92" rx="15"/>
-    <rect class="small" x="805" y="341" width="350" height="92" rx="15"/>
-    <text class="feature" x="67" y="376">Navigate references</text>
-    <text class="caption" x="67" y="404">Definitions, call sites and source locations</text>
-    <text class="feature" x="447" y="376">Trace dependencies</text>
-    <text class="caption" x="447" y="404">Direct and transitive relationships</text>
-    <text class="feature" x="827" y="376">Analyze change impact</text>
-    <text class="caption" x="827" y="404">Git snapshots and test candidates</text>
-  </g>
-  <rect x="45" y="462" width="1110" height="48" rx="12" fill="#163C3B" stroke="#44796D" stroke-width="1"/>
-  <circle cx="70" cy="485" r="6" fill="#90EFD1"/>
-  <text x="89" y="491" style="font:600 17px Inter,ui-sans-serif,system-ui,sans-serif;fill:#D8F8EA">Evidence first:</text>
-  <text x="232" y="491" style="font:400 17px Inter,ui-sans-serif,system-ui,sans-serif;fill:#C9DED8">source ranges · resolution status · explicit uncertainty and limits</text>
+
+  <rect class="bg" x="0.5" y="0.5" width="1039" height="483" rx="12"/>
+
+  <!-- Inputs -->
+  <rect class="box" x="28" y="32" width="208" height="100" rx="8"/>
+  <text class="title" x="48" y="72">Source code</text>
+  <text class="item" x="48" y="100">TypeScript · TSX</text>
+
+  <rect class="box" x="28" y="152" width="208" height="100" rx="8"/>
+  <text class="title" x="48" y="192">Project knowledge</text>
+  <text class="item" x="48" y="220">Markdown · PRDs · ADRs</text>
+
+  <!-- Rebuildable index -->
+  <rect class="box" x="296" y="32" width="220" height="220" rx="8"/>
+  <text class="title" x="316" y="66">Repogi index</text>
+  <text class="item" x="316" y="98">Static code graph</text>
+  <text class="item" x="316" y="121">Document search</text>
+  <text class="item" x="316" y="144">Knowledge relationships</text>
+  <line class="rule" x1="316" y1="186" x2="496" y2="186"/>
+  <text class="path" x="316" y="212">.code-intel/index.db</text>
+  <text class="tag" x="316" y="235">REBUILDABLE</text>
+
+  <!-- Retrieval -->
+  <rect class="box" x="576" y="32" width="200" height="220" rx="8"/>
+  <text class="title" x="596" y="66">Retrieval</text>
+  <text class="item" x="596" y="98">Context</text>
+  <text class="item" x="596" y="121">Trace</text>
+  <text class="item" x="596" y="144">Investigate</text>
+  <text class="item" x="596" y="167">Change impact</text>
+  <line class="rule" x1="596" y1="186" x2="756" y2="186"/>
+  <text class="note" x="596" y="212">Source-backed,</text>
+  <text class="note" x="596" y="232">bounded results</text>
+
+  <!-- Interfaces -->
+  <rect class="box" x="836" y="32" width="176" height="220" rx="8"/>
+  <text class="title" x="856" y="66">CLI + MCP</text>
+  <text class="item" x="856" y="98">Developers</text>
+  <text class="item" x="856" y="121">Coding agents</text>
+  <line class="rule" x1="856" y1="186" x2="992" y2="186"/>
+  <text class="note" x="856" y="212">MCP tools are</text>
+  <text class="note" x="856" y="232">read-only</text>
+
+  <!-- Durable memory -->
+  <rect class="memory" x="296" y="332" width="480" height="120" rx="8"/>
+  <text class="title" x="316" y="366">Project memory</text>
+  <text class="tag accent" x="756" y="365" text-anchor="end">DURABLE</text>
+  <text class="item" x="316" y="396">Reviewed claims, evidence snapshots and review history</text>
+  <text class="path" x="316" y="430">.repogi/memory.db</text>
+  <text class="note" x="756" y="430" text-anchor="end">Survives re-indexing</text>
+
+  <!-- Indexing and retrieval flow -->
+  <path class="link" d="M236 82H294" marker-end="url(#arrow)"/>
+  <path class="link" d="M236 202H294" marker-end="url(#arrow)"/>
+  <path class="link" d="M516 142H574" marker-end="url(#arrow)"/>
+  <path class="link" d="M776 142H834" marker-end="url(#arrow)"/>
+
+  <!-- Memory relationships -->
+  <path class="check" d="M406 330V254"/>
+  <text class="note" x="418" y="297">evidence re-verified</text>
+  <path class="link optional" d="M676 330V254" marker-end="url(#arrow)"/>
+  <text class="label" x="688" y="297">optional recall</text>
+  <path class="link" d="M924 252V392H778" marker-end="url(#arrow)"/>
+  <text class="label" x="850" y="382" text-anchor="middle">explicit review</text>
+  <text class="note" x="850" y="412" text-anchor="middle">CLI only</text>
 </svg>

@@ -1,6 +1,6 @@
 # Project memory
 
-Project memory is an internal development milestone (v0.5), not a published release. The workspace version remains 0.1.0, and public release preparation is deferred until the combined milestones are validated and publication is explicitly approved.
+Project memory, with durable storage, backup and recovery, is part of release 0.1.1. Until 0.1.1 is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
 
 Project memory lets developers keep **reviewed project knowledge** across sessions: architecture decisions, constraints, requirements, conventions and implementation notes, each stated as a short claim with the indexed evidence it was based on. Coding agents can read approved memories, through the CLI, the opt-in `atlas_memory` MCP tool or `repogi investigate --include-memory`, instead of rediscovering the same decisions.
 
@@ -11,7 +11,7 @@ A memory is not indexed Markdown and not an investigation result:
 | Document | Repository source material (Markdown, TypeScript). | The working tree. |
 | Knowledge entity / relationship | A requirement, decision or explicit claim parsed from documents. | Rebuilt by every `repogi index`. |
 | Investigation | A temporary plan of what to inspect. | Never stored. |
-| **Memory** | A developer-reviewed claim with immutable evidence snapshots, revisions and a review history. | Kept until retired or superseded; never deleted. |
+| **Memory** | A developer-reviewed claim with immutable evidence snapshots, revisions and a review history. | Kept in `.repogi/memory.db` until retired or superseded; never deleted, and independent of the rebuildable index. |
 
 Nothing becomes a memory automatically. Investigations, searches, indexing and MCP calls never create, approve or change memories. A developer proposes a claim, and a named reviewer approves the exact revision.
 
@@ -33,7 +33,7 @@ propose ──► pending_review ──approve──► approved ──supersede
 
 ## CLI
 
-All memory commands work on the repository that owns the nearest `.code-intel/index.db`. `list`, `show`, `history`, `search`, `verify` and `conflicts` are read-only. `propose`, `correct`, `approve`, `reject`, `supersede`, `retire` and `verify --record` are explicit writes. No command migrates the index; run `repogi index <path>` once with this binary to add the memory tables (schema 5).
+All memory commands work on the nearest repository with a `.code-intel/index.db` or `.repogi/memory.db`. Memories are stored durably in `.repogi/memory.db` (see [memory storage](MEMORY_STORAGE.md)); the code index is read to capture and verify evidence and is optional for reads. `list`, `show`, `history`, `search`, `verify`, `conflicts`, `status` and `export` are read-only and never create or migrate anything. `propose`, `correct`, `approve`, `reject`, `supersede`, `retire`, `verify --record`, `migrate`, `import` and `rebind` are explicit writes. No memory command writes the code index's data.
 
 ```sh
 repogi memory propose --type architecture_decision \
@@ -51,11 +51,16 @@ repogi memory retire mem-0004 --reason "..." --reviewer alice
 repogi memory history mem-0001
 repogi memory list [--status approved] [--type requirement] [--after mem-0020] [--limit 20]
 repogi memory conflicts
+repogi memory status [--check]                  # where memories live, store identity, integrity
+repogi memory migrate                           # move index-stored memories into .repogi/memory.db
+repogi memory export --output repogi-memory.json
+repogi memory import repogi-memory.json [--restore] [--dry-run]
+repogi memory rebind --from <recorded root>     # after moving the repository
 ```
 
 Memory types: `architecture_decision`, `project_constraint`, `requirement`, `project_convention`, `implementation_note`. Titles are at most 200 bytes and claims at most 2,000 bytes; both refuse control characters, newlines included. `--asserts SUBJECT=status` (for example `REQ-AUTH-001=deprecated`) records a structured statement used only for conflict detection. Every read takes `--format text|json` and `--max-bytes` (default 12,000 text, 24,000 JSON). Output that does not fit drops trailing items and reports `truncated: true`.
 
-Failures exit non-zero with `{"error":{"code":…}}` on stderr. Memory errors keep stable codes: `memory_unavailable`, `memory_not_found`, `duplicate_memory`, `evidence_required`, `evidence_not_found`, `ambiguous_evidence`, `evidence_cannot_back`, `evidence_not_current`, `evidence_unreadable`, `invalid_path`, `digest_mismatch`, `reviewer_required`, `nothing_to_review`, `review_pending`, `invalid_transition`, `concurrent_update`, `invalid_actor`, `invalid_memory_id` and `invalid_arguments`.
+Failures exit non-zero with `{"error":{"code":…}}` on stderr. Memory errors keep stable codes: `memory_not_found`, `index_required`, `digest_invalid`, `memory_root_mismatch`, `memory_store_invalid`, `memory_store_newer`, `memory_store_copied`, `migration_conflict`, `migration_required`, `import_invalid`, `import_unsupported`, `integrity_mismatch`, `import_conflict`, `repository_mismatch`, `output_exists`, `output_rejected`, `duplicate_memory`, `evidence_required`, `evidence_not_found`, `ambiguous_evidence`, `evidence_cannot_back`, `evidence_not_current`, `evidence_unreadable`, `invalid_path`, `digest_mismatch`, `reviewer_required`, `nothing_to_review`, `review_pending`, `invalid_transition`, `concurrent_update`, `invalid_actor`, `invalid_memory_id` and `invalid_arguments`.
 
 ## Approval model
 
@@ -63,7 +68,7 @@ Approval is a deliberate, recorded act:
 
 1. **Digest binding.** Every revision has a BLAKE3 digest over its type, title, claim, assertion and every evidence snapshot. `approve` and `reject` must name at least 12 hex characters of the pending digest (from `memory show`). A digest for anything else is refused with `digest_mismatch`.
 2. **Named reviewer.** Every review write (`approve`, `reject`, `supersede`, `retire`, `verify --record`) needs `--reviewer <name>` or `REPOGI_MEMORY_REVIEWER`. Without one it fails with `reviewer_required`. The name is recorded in the history. It is a self-reported label, not authentication.
-3. **Current evidence at approval.** Approval re-verifies the pending revision. Every backing evidence item must still be `current`, or approval fails with `evidence_not_current`; at least one backing item is required.
+3. **Current evidence at approval, inside the write transaction.** Under the memory write lock, approval re-reads the pending revision, recomputes its digest from the stored claim and evidence (`digest_invalid` if they differ), and re-verifies every backing item against one read snapshot of the index and the working tree. Every backing item must be `current` (`evidence_not_current` otherwise), at least one is required, and approval needs the code index (`index_required`). The state change and the `approved` event commit together. See [approval consistency](MEMORY_STORAGE.md#approval-consistency).
 4. **No agent write path.** MCP exposes only read operations. Repository text, search results and investigation output never trigger writes. A note in a document that looks like an approval command is just indexed text.
 
 Repogi cannot tell a human from an agent that has unrestricted shell access and runs the CLI. The digest and reviewer requirements make approval explicit and auditable, not impossible to automate. If an agent has shell access, review its commands, or keep `REPOGI_MEMORY_REVIEWER` unset in its environment.
@@ -94,7 +99,8 @@ These classes describe the evidence, not the truth of the claim. A validated ref
 1. **Identity.** The recorded entity, relationship, fact or static edge is looked up by exact ID. Fact and relationship IDs contain byte offsets, so a missing ID is re-located only by exact data: the same author ID, the same claim (source, kind and target text), or the same declaration kind, name and file. A unique match is reported as `identity_relocated` and the bytes then decide. No match is `missing` (`identity_removed`, `relationship_removed`); several matches are `unresolved` (`identity_ambiguous`). A relationship that is no longer validated, or now points elsewhere, is reported as `relationship_status_changed` or `relationship_target_changed`.
 2. **Decision status.** A cited decision whose recorded status changed to `superseded`, `deprecated` or `rejected` is `stale` (`decision_status_changed`).
 3. **Bytes.** The cited file is read through the same symlink-refusing, root-confined primitive as selected-file checks. A file that differs from the index is `stale` (`source_changed_since_index`; re-index, then verify again). A deleted file is `missing` (`source_deleted`). Cited bytes whose BLAKE3 hash differs from the snapshot are `stale` (`cited_bytes_changed`). An unreadable file, or one past the 64-file read cap, is `unverified`.
-4. **Index revision.** A newer index revision is reported as `index_revision_advanced`. It is informational only.
+4. **Index revision.** A newer index revision is reported as `index_revision_advanced`, and a lower one (the index was rebuilt or replaced) as `index_rebuilt`. Both are informational only: identities are re-resolved, never assumed.
+5. **No index.** Without `.code-intel/index.db`, every item is `unverified` (`index_unavailable`), and responses carry a `storage` note. Memories and history stay readable.
 
 A memory's state is the worst state of its backing evidence (`missing` > `unresolved` > `stale` > `unverified` > `current`). With no backing evidence it is `unverified`. Verification never edits, approves, corrects or supersedes a memory, and never stores its result. `verify --record --reviewer <name>` appends a `verified` event to the history and changes nothing else.
 
@@ -120,7 +126,7 @@ Each conflict lists the memory IDs, the subject, the evidence items with their c
 
 ## Investigation integration
 
-`repogi investigate "<task>" --include-memory` (MCP: `include_memory: true`, offered only when `atlas_memory` is enabled) adds approved memories as their own evidence class, `approved_project_memory`. This class records review status, not runtime proof. Without the flag, investigation never reads memory, and its output is byte-identical to v0.4.
+`repogi investigate "<task>" --include-memory` (MCP: `include_memory: true`, offered only when `atlas_memory` is enabled) adds approved memories as their own evidence class, `approved_project_memory`. This class records review status, not runtime proof. Without the flag, investigation never reads memory, and its output is byte-identical to investigation without memory support.
 
 A memory is recalled when its approved evidence cites a plan identity together with at least one task term, or when it matches every task term. With explicit selectors, only the selected identities count and no term is needed. Plan identities are the explicit selection if there is one, otherwise the ranked code targets and knowledge targets. Memories citing an identity and matching every term rank first, then identity-only matches by plan priority, then text-only matches. At most 4 memories are recalled (`budget.max_memories`). Pending, rejected, superseded and retired memories are never recalled.
 
@@ -144,19 +150,19 @@ All operations also accept `root`, `format` (`agent` or `json`) and `max_bytes` 
 
 ## Storage and migration
 
-Memories live in the repository's own `.code-intel/index.db` (schema 5), in five additive tables: `memories`, `memory_revisions`, `memory_evidence`, `memory_events` and the FTS5 table `memory_search`, plus lookup indexes and immutability triggers. There is no global or shared store. A memory belongs to the repository root recorded in its index, and a copied index is refused in another root.
+Memories live in `.repogi/memory.db`, a separately versioned SQLite store (memory schema 1, `application_id` "RPGM") that belongs to one repository root and one memory lineage. Deleting or rebuilding `.code-intel/` never removes them. [Memory storage](MEMORY_STORAGE.md) documents the layout, the schema, migration and crash recovery, export and import, approval consistency and recovery procedures.
 
-- `repogi index` migrates schema 1–4 indexes to 5 in one transaction, and leaves code and knowledge data intact. Indexing never reads or writes memory rows.
-- Read commands and MCP never migrate. On an older index, memory reads and writes fail with `memory_unavailable`, and `investigate --include-memory` reports it under `completeness.unsupported`.
+- Earlier source builds kept memories in index schema 5. The first explicit write (`memory migrate`, any memory write, or `repogi index`) copies them row for row into a validated new store, installs it without clobbering, and freezes the old rows (kept, never deleted) against writes by older binaries. Reads never migrate.
 - Every write is one `IMMEDIATE` transaction that re-checks the state it depends on. Concurrent reviews of one revision commit exactly once. `correct --expect-version` refuses with `concurrent_update` when the memory changed since it was read. A failed write rolls back completely.
-- **Downgrade:** v0.4 and older binaries refuse a schema-5 index (`index schema 5 is newer than supported schema 4`). Downgrading means moving `.code-intel` aside and re-indexing, and memories then stay in the moved database.
-- **Durability:** memories are not rebuildable. Deleting or replacing `.code-intel` (for example after a root-mismatch error) removes them from the active index. Back up `.code-intel/index.db` before doing that. Impact snapshot caches under `.code-intel/impact` may hold read-only copies of the database, including memory rows; Repogi never reads memories from them.
+- Impact snapshot caches never contain memory records.
+- **Downgrade:** the index schema stays 5. Those earlier builds cannot write the frozen legacy tables and do not read `.repogi/`. A newer memory schema is refused (`memory_store_newer`), never downgraded.
 
 ## Security boundaries
 
 - Stored claims and repository text are data, never instructions. Memory text is never executed or interpreted. Text output escapes every stored and repository string, and JSON carries it verbatim.
 - No project code, script or test runs during capture, verification, search or investigation.
-- Evidence paths must be repository-relative without `..`, a root or backslashes. Files are read only through the confined, symlink-refusing primitive, and symlinked index state is refused.
+- Evidence paths must be repository-relative without `..`, a root or backslashes. Files are read only through the confined, symlink-refusing primitive, and symlinked index or memory state is refused.
+- Imports are validated in full (size, structure, digests, lifecycle, text) before anything is written, and imported text is never executed or followed.
 - Every query is bounded: candidates, results, history, evidence per revision, files read per request (64) and conflict scans (200). Reads honour cancellation.
 
 ## Evaluation (labeled fixture)
@@ -186,8 +192,8 @@ The evaluator also records latency, database growth and a synthetic scale run (b
 ## Known limitations
 
 - Approval cannot distinguish a human from an agent with unrestricted shell access (see the approval model above). Reviewer names are self-reported.
-- Memories live in the index database: deleting `.code-intel` deletes them from the active index, and there is no export/import command yet.
-- Approval re-verifies evidence just before its write transaction, not inside it. A source edit in that short window is not detected at approval, though the digest still binds the exact claim and snapshot, and later reads report the change.
+- The memory store and the code index are separate databases: approval verifies against one index read snapshot inside the memory transaction, but cannot freeze the working tree. A source edit in the milliseconds between the byte check and the commit is not detected at approval; the digest still binds the exact snapshot, and later reads report the change.
+- Export digests are unkeyed integrity checks, not signatures, and the repository ID identifies a memory lineage, not a repository.
 - Verification compares identities and bytes. It does not check that a claim is true, and code edits that leave the cited bytes unchanged are not detected.
 - Relocation is limited to exact author IDs, identical claims, and same-kind, same-name declarations in the same file. A renamed declaration or moved file is reported as missing.
 - Conflict detection is structural (assertions, decision status, evidence state). Contradictions between free-text claims are not detected.

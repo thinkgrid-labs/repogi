@@ -230,10 +230,10 @@ impl Resolver<'_> {
                 steps,
             ));
         }
-        if let Some(base_url) = &project.base_url {
-            if let Some(located) = self.via_base_url(project, base_url, path, name, &mut steps) {
-                return located;
-            }
+        if let Some(base_url) = &project.base_url
+            && let Some(located) = self.via_base_url(project, base_url, path, name, &mut steps)
+        {
+            return located;
         }
         Err(if matched.is_some() {
             Targets::failure(Resolution::Unresolved, "module_not_found", steps)
@@ -638,12 +638,11 @@ impl Resolver<'_> {
             for export in &module.exports {
                 if export.name != "*" {
                     names.insert(export.name.as_str());
-                } else if export.local == "*" {
-                    if let Some(from) = export.module.as_deref() {
-                        if let Ok((target, _)) = self.module_path(key, from) {
-                            stack.push(target);
-                        }
-                    }
+                } else if export.local == "*"
+                    && let Some(from) = export.module.as_deref()
+                    && let Ok((target, _)) = self.module_path(key, from)
+                {
+                    stack.push(target);
                 }
             }
         }

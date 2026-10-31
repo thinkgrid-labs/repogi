@@ -434,6 +434,7 @@ fn discover(root: &Path, check: &dyn Fn() -> Result<()>) -> Result<Vec<ignore::D
                         "node_modules"
                             | ".git"
                             | ".code-intel"
+                            | ".repogi"
                             | "dist"
                             | "build"
                             | "coverage"

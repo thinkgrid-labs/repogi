@@ -98,19 +98,18 @@ fn declaration_facts(file: &mut IndexedFile, node: Node<'_>, source: &str) -> Ve
             let mut ids = Vec::new();
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                if child.kind() == "variable_declarator" {
-                    if let Some(name) = child
+                if child.kind() == "variable_declarator"
+                    && let Some(name) = child
                         .child_by_field_name("name")
                         .filter(|name| name.kind() == "identifier")
-                    {
-                        ids.push(add_fact(
-                            file,
-                            child,
-                            "variable",
-                            text(name, source),
-                            source,
-                        ));
-                    }
+                {
+                    ids.push(add_fact(
+                        file,
+                        child,
+                        "variable",
+                        text(name, source),
+                        source,
+                    ));
                 }
             }
             return ids;
@@ -122,28 +121,28 @@ fn declaration_facts(file: &mut IndexedFile, node: Node<'_>, source: &str) -> Ve
     };
     let name = text(name, source);
     let id = add_fact(file, node, kind, name, source);
-    if matches!(kind, "class" | "interface") {
-        if let Some(body) = node.child_by_field_name("body") {
-            let mut cursor = body.walk();
-            for method in body.named_children(&mut cursor) {
-                if method.has_error()
-                    || !matches!(
-                        method.kind(),
-                        "method_definition" | "method_signature" | "abstract_method_signature"
-                    )
-                {
-                    continue;
-                }
-                if let Some(method_name) = method.child_by_field_name("name").filter(|name| {
-                    matches!(
-                        name.kind(),
-                        "property_identifier" | "private_property_identifier"
-                    )
-                }) {
-                    let qualified = format!("{name}.{}", text(method_name, source));
-                    let method_id = add_fact(file, method, "method", &qualified, source);
-                    add_edge(file, method, id.clone(), Some(method_id), None, "contains");
-                }
+    if matches!(kind, "class" | "interface")
+        && let Some(body) = node.child_by_field_name("body")
+    {
+        let mut cursor = body.walk();
+        for method in body.named_children(&mut cursor) {
+            if method.has_error()
+                || !matches!(
+                    method.kind(),
+                    "method_definition" | "method_signature" | "abstract_method_signature"
+                )
+            {
+                continue;
+            }
+            if let Some(method_name) = method.child_by_field_name("name").filter(|name| {
+                matches!(
+                    name.kind(),
+                    "property_identifier" | "private_property_identifier"
+                )
+            }) {
+                let qualified = format!("{name}.{}", text(method_name, source));
+                let method_id = add_fact(file, method, "method", &qualified, source);
+                add_edge(file, method, id.clone(), Some(method_id), None, "contains");
             }
         }
     }

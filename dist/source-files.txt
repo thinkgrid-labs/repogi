@@ -38,6 +38,7 @@ crates/cli/tests/mcp/signal_regressions.rs
 crates/cli/tests/mcp_impact.rs
 crates/cli/tests/mcp_manifest.rs
 crates/cli/tests/mcp_tests.rs
+crates/cli/tests/memory_durability.rs
 crates/cli/tests/module_resolution.rs
 crates/cli/tests/progressive.rs
 crates/cli/tests/project_memory.rs
@@ -83,6 +84,7 @@ crates/retrieval/src/legacy.rs
 crates/retrieval/src/lib.rs
 crates/retrieval/src/manifest.rs
 crates/retrieval/src/memory.rs
+crates/retrieval/src/memory/backup.rs
 crates/retrieval/src/memory/capture.rs
 crates/retrieval/src/memory/conflicts.rs
 crates/retrieval/src/memory/render.rs
@@ -99,9 +101,11 @@ crates/retrieval/src/tests/inventory.rs
 crates/retrieval/src/tests/output.rs
 crates/store/Cargo.toml
 crates/store/LICENSE
+crates/store/src/durable.rs
 crates/store/src/knowledge.rs
 crates/store/src/lib.rs
 crates/store/src/memory.rs
+crates/store/src/memory_store.sql
 crates/store/src/migration_1.sql
 crates/store/src/migration_2.sql
 crates/store/src/migration_3.sql
@@ -131,6 +135,7 @@ docs/MCP.md
 docs/MCP_IMPACT.md
 docs/MCP_TEST_DISCOVERY.md
 docs/MCP_VERIFICATION_MANIFEST.md
+docs/MEMORY_STORAGE.md
 docs/MODULE_RESOLUTION.md
 docs/PROJECT_MEMORY.md
 docs/README.md
@@ -569,6 +574,7 @@ licenses/native/SQLITE_HEADER.txt
 licenses/rust/COPYRIGHT-library.html
 scripts/evaluation/agent_investigation.py
 scripts/evaluation/knowledge_relationships.py
+scripts/evaluation/memory_durability.py
 scripts/evaluation/project_memory.py
 scripts/prepare_source.py
 scripts/release/assemble.py

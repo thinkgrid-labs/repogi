@@ -354,13 +354,13 @@ pub(super) fn resolve(tx: &Transaction<'_>, changed: bool, revision: u64) -> Res
     }
     let mut lineage = BTreeMap::<String, Vec<String>>::new();
     for edge in &edges {
-        if edge.kind == RelationshipKind::Supersedes {
-            if let Some(target) = &edge.target_id {
-                lineage
-                    .entry(edge.source_id.clone())
-                    .or_default()
-                    .push(target.clone());
-            }
+        if edge.kind == RelationshipKind::Supersedes
+            && let Some(target) = &edge.target_id
+        {
+            lineage
+                .entry(edge.source_id.clone())
+                .or_default()
+                .push(target.clone());
         }
     }
     let statuses: BTreeMap<_, _> = entities

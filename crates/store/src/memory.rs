@@ -1,19 +1,18 @@
-//! Reviewed project memory persistence (schema 5). Every write is one
-//! `IMMEDIATE` transaction that re-checks the state it depends on, so a
+//! Reviewed project memory queries and writes over a [`MemoryStore`] (the
+//! durable `.repogi/memory.db`, or a read-only legacy/empty view). Every write
+//! is one `IMMEDIATE` transaction that re-checks the state it depends on, so a
 //! concurrent writer either waits or fails without partial effects. Indexing
 //! never touches these tables; reads never migrate.
-use std::{collections::BTreeMap, path::Path};
+use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail, ensure};
 use code_intel_core::memory::{
     Assertion, EventRecord, EvidenceRole, EvidenceSnapshot, Memory, MemoryEvent, MemoryStatus,
-    MemoryType, Revision, RevisionRecord, RevisionState, claim_key,
+    MemoryType, Revision, RevisionRecord, RevisionState, claim_key, search_subjects,
 };
-use rusqlite::{
-    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
-};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
-use crate::{DATABASE_VERSION, Store, configure};
+use crate::{Interrupt, MemoryStore};
 
 /// A typed failure the CLI and MCP adapters report with a stable code.
 #[derive(Debug)]
@@ -30,12 +29,31 @@ impl std::fmt::Display for MemoryError {
 
 impl std::error::Error for MemoryError {}
 
-fn fail<T>(code: &'static str, message: impl Into<String>) -> Result<T> {
+pub(crate) fn fail<T>(code: &'static str, message: impl Into<String>) -> Result<T> {
     Err(MemoryError {
         code,
         message: message.into(),
     }
     .into())
+}
+
+/// Fault injection for recovery tests (debug builds only): when the
+/// comma-separated `REPOGI_TEST_FAULT` names this point, fail here, or abort
+/// the process (simulating a crash) when it is suffixed with `:abort`.
+pub fn fault(point: &str) -> Result<()> {
+    #[cfg(debug_assertions)]
+    if let Ok(requested) = std::env::var("REPOGI_TEST_FAULT") {
+        for requested in requested.split(',') {
+            if requested == point {
+                bail!("injected fault at {point}");
+            }
+            if requested.strip_suffix(":abort") == Some(point) {
+                std::process::abort();
+            }
+        }
+    }
+    let _ = point;
+    Ok(())
 }
 
 /// A new claim revision, with evidence already captured by value.
@@ -88,72 +106,25 @@ pub struct AssertionClash {
     pub claims: Vec<(String, u32, String)>,
 }
 
-impl Store {
-    /// Open an existing schema-5 index for an explicit memory write. Never
-    /// migrates: an older index must be upgraded with `repogi index` first.
-    pub fn open_memory_writer(database: &Path, root: &Path) -> Result<Self> {
-        let connection = Connection::open_with_flags(
-            database,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
-        .with_context(|| format!("open index {}", database.display()))?;
-        configure(&connection)?;
-        let version: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version < DATABASE_VERSION {
-            return fail(
-                "memory_unavailable",
-                format!(
-                    "index schema {version} has no project memory; run `repogi index <path>` to upgrade it to schema {DATABASE_VERSION} (memory commands never migrate)"
-                ),
-            );
+impl MemoryStore {
+    /// Lets another thread abort this connection's running statement.
+    #[must_use]
+    pub fn interrupt_handle(&self) -> Interrupt {
+        Interrupt {
+            sqlite: self.connection.get_interrupt_handle(),
+            cancelled: std::sync::Arc::clone(&self.cancelled),
         }
-        ensure!(
-            version == DATABASE_VERSION,
-            "index schema {version} is newer than supported schema {DATABASE_VERSION}; use a compatible repogi binary"
-        );
-        let stored: Option<String> = connection
-            .query_row("SELECT value FROM metadata WHERE key='root'", [], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        ensure!(
-            stored.as_deref() == root.to_str(),
-            "index belongs to a different repository root; memory is scoped to the repository that owns the index"
-        );
-        Ok(Self {
-            connection,
-            cancelled: std::sync::Arc::default(),
-        })
     }
 
-    /// True when this snapshot has the schema-5 memory tables.
-    pub fn memory_available(&self) -> Result<bool> {
-        self.check_cancelled()?;
-        let version: u32 = self
-            .connection
-            .pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version < 5 {
-            return Ok(false);
-        }
-        Ok(self.connection.query_row(
-            "SELECT count(*)=5 FROM sqlite_master WHERE name IN ('memories','memory_revisions','memory_evidence','memory_events','memory_search')",
-            [],
-            |r| r.get(0),
-        )?)
-    }
-
-    fn require_memory(&self) -> Result<()> {
-        if !self.memory_available()? {
-            return fail(
-                "memory_unavailable",
-                "this index has no project memory (schema < 5); run `repogi index <path>` with this binary (reads never migrate)",
-            );
-        }
+    pub fn check_cancelled(&self) -> Result<()> {
+        ensure!(
+            !self.cancelled.load(std::sync::atomic::Ordering::Relaxed),
+            "request cancelled"
+        );
         Ok(())
     }
 
     pub fn memory(&self, id: &str) -> Result<Option<Memory>> {
-        self.require_memory()?;
         self.connection
             .query_row(
                 "SELECT id,type,status,latest_revision,approved_revision,pending_revision,superseded_by,created_at,updated_at,version FROM memories WHERE id=?1",
@@ -166,7 +137,6 @@ impl Store {
 
     /// Bounded listing in ID order (IDs are allocated in creation order).
     pub fn memories(&self, filter: &MemoryFilter, limit: u32) -> Result<Vec<Memory>> {
-        self.require_memory()?;
         ensure!(limit <= 1001, "memory listing limit exceeds 1001");
         let statuses: Vec<&str> = filter.statuses.iter().map(|s| s.label()).collect();
         let mut query = self.connection.prepare(
@@ -189,45 +159,11 @@ impl Store {
     }
 
     pub fn memory_revision(&self, id: &str, revision: u32) -> Result<Option<Revision>> {
-        self.require_memory()?;
-        let row: Option<(String, String, String)> = self
-            .connection
-            .query_row(
-                "SELECT state,digest,data FROM memory_revisions WHERE memory_id=?1 AND revision=?2",
-                params![id, revision],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()?;
-        let Some((state, digest, data)) = row else {
-            return Ok(None);
-        };
-        let mut stored: RevisionRecord = serde_json::from_str(&data)?;
-        let mut query = self.connection.prepare(
-            "SELECT data FROM memory_evidence WHERE memory_id=?1 AND revision=?2 ORDER BY ordinal",
-        )?;
-        let evidence = query
-            .query_map(params![id, revision], |r| r.get::<_, String>(0))?
-            .map(|data| Ok(serde_json::from_str(&data?)?))
-            .collect::<Result<Vec<EvidenceSnapshot>>>()?;
-        Ok(Some(Revision {
-            revision,
-            memory_type: stored.memory_type,
-            title: std::mem::take(&mut stored.title),
-            claim: std::mem::take(&mut stored.claim),
-            assertion: stored.assertion.take(),
-            state: RevisionState::parse(&state).context("invalid memory revision state")?,
-            digest,
-            index_revision: stored.index_revision,
-            created_at: std::mem::take(&mut stored.created_at),
-            proposed_by: std::mem::take(&mut stored.proposed_by),
-            reason: stored.reason.take(),
-            evidence,
-        }))
+        revision_at(&self.connection, id, revision)
     }
 
     /// Newest first, bounded.
     pub fn memory_revisions(&self, id: &str, limit: u32) -> Result<Vec<Revision>> {
-        self.require_memory()?;
         let revisions: Vec<u32> = {
             let mut query = self.connection.prepare(
                 "SELECT revision FROM memory_revisions WHERE memory_id=?1 ORDER BY revision DESC LIMIT ?2",
@@ -247,7 +183,6 @@ impl Store {
 
     /// Oldest first, bounded; `after` is an exclusive sequence cursor.
     pub fn memory_events(&self, id: &str, after: u64, limit: u32) -> Result<Vec<MemoryEvent>> {
-        self.require_memory()?;
         let mut query = self.connection.prepare(
             "SELECT sequence,revision,action,data FROM memory_events WHERE memory_id=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3",
         )?;
@@ -278,7 +213,6 @@ impl Store {
     }
 
     pub fn memory_event_count(&self, id: &str) -> Result<u64> {
-        self.require_memory()?;
         let count: i64 = self.connection.query_row(
             "SELECT count(*) FROM memory_events WHERE memory_id=?1",
             [id],
@@ -297,7 +231,6 @@ impl Store {
         include_pending: bool,
         limit: u32,
     ) -> Result<Vec<MemoryHit>> {
-        self.require_memory()?;
         self.check_cancelled()?;
         let statuses: Vec<&str> = statuses.iter().map(|s| s.label()).collect();
         let mut query = self.connection.prepare(
@@ -330,7 +263,6 @@ impl Store {
     /// (exact entity/fact/relationship IDs, explicit REQ-/ADR- IDs, or the
     /// target of a cited relationship or static edge).
     pub fn memories_citing(&self, subjects: &[String], limit: u32) -> Result<Vec<String>> {
-        self.require_memory()?;
         self.check_cancelled()?;
         let mut query = self.connection.prepare(
             "SELECT DISTINCT m.id FROM memory_evidence e JOIN memories m
@@ -347,7 +279,6 @@ impl Store {
 
     /// Subjects with more than one asserted status among approved memories.
     pub fn memory_assertion_clashes(&self, limit: u32) -> Result<Vec<AssertionClash>> {
-        self.require_memory()?;
         self.check_cancelled()?;
         let mut query = self.connection.prepare(
             "SELECT r.assertion_subject, m.id, r.revision, r.assertion_status
@@ -388,7 +319,6 @@ impl Store {
         memory_type: MemoryType,
         claim: &str,
     ) -> Result<Vec<(String, MemoryStatus, bool)>> {
-        self.require_memory()?;
         duplicates(&self.connection, &claim_key(memory_type, claim))
     }
 
@@ -463,12 +393,19 @@ impl Store {
 
     /// Approve or reject the pending revision whose digest starts with
     /// `digest`. The digest binds the decision to the exact claim and evidence.
+    ///
+    /// Everything runs inside one write transaction: the memory's version,
+    /// pending revision and digest are re-read under the lock, then `check`
+    /// sees the exact stored revision and may refuse (approval re-verifies the
+    /// evidence there) or add history detail. Only then are the state change
+    /// and the review event written, together.
     pub fn memory_review(
         &mut self,
         id: &str,
         digest: &str,
         decision: Decision,
         act: &Act<'_>,
+        check: &mut dyn FnMut(&Revision) -> Result<BTreeMap<String, String>>,
     ) -> Result<u32> {
         self.write(|tx| {
             let memory = locked(tx, id, None)?;
@@ -494,6 +431,17 @@ impl Store {
                     ),
                 );
             }
+            let stored = revision_at(tx, id, revision)?
+                .context("pending memory revision is missing")?;
+            let mut detail = act.detail.clone().unwrap_or_default();
+            detail.extend(check(&stored)?);
+            let act = &Act {
+                actor: act.actor,
+                at: act.at,
+                note: act.note,
+                detail: (!detail.is_empty()).then_some(detail),
+            };
+            fault("review_before_write")?;
             match decision {
                 Decision::Approve => {
                     tx.execute(
@@ -601,6 +549,7 @@ impl Store {
     }
 
     fn write<T>(&mut self, body: impl FnOnce(&Transaction<'_>) -> Result<T>) -> Result<T> {
+        self.require_durable()?;
         self.check_cancelled()?;
         let tx = self
             .connection
@@ -610,6 +559,41 @@ impl Store {
             .context("commit memory update; nothing was changed on failure")?;
         Ok(value)
     }
+}
+
+fn revision_at(connection: &Connection, id: &str, revision: u32) -> Result<Option<Revision>> {
+    let row: Option<(String, String, String)> = connection
+        .query_row(
+            "SELECT state,digest,data FROM memory_revisions WHERE memory_id=?1 AND revision=?2",
+            params![id, revision],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((state, digest, data)) = row else {
+        return Ok(None);
+    };
+    let mut stored: RevisionRecord = serde_json::from_str(&data)?;
+    let mut query = connection.prepare(
+        "SELECT data FROM memory_evidence WHERE memory_id=?1 AND revision=?2 ORDER BY ordinal",
+    )?;
+    let evidence = query
+        .query_map(params![id, revision], |r| r.get::<_, String>(0))?
+        .map(|data| Ok(serde_json::from_str(&data?)?))
+        .collect::<Result<Vec<EvidenceSnapshot>>>()?;
+    Ok(Some(Revision {
+        revision,
+        memory_type: stored.memory_type,
+        title: std::mem::take(&mut stored.title),
+        claim: std::mem::take(&mut stored.claim),
+        assertion: stored.assertion.take(),
+        state: RevisionState::parse(&state).context("invalid memory revision state")?,
+        digest,
+        index_revision: stored.index_revision,
+        created_at: std::mem::take(&mut stored.created_at),
+        proposed_by: std::mem::take(&mut stored.proposed_by),
+        reason: stored.reason.take(),
+        evidence,
+    }))
 }
 
 fn memory_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Result<Memory>> {
@@ -714,7 +698,6 @@ fn insert_revision(
             serde_json::to_string(&stored)?
         ],
     )?;
-    let mut subjects: Vec<&str> = Vec::new();
     for (ordinal, evidence) in new.evidence.iter().enumerate() {
         tx.execute(
             "INSERT INTO memory_evidence(memory_id,revision,ordinal,role,class,subject_id,explicit_id,target_id,path,data) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
@@ -737,15 +720,16 @@ fn insert_revision(
                 serde_json::to_string(evidence)?
             ],
         )?;
-        subjects.extend(evidence.explicit_id.as_deref());
-        subjects.push(&evidence.citation.path);
-    }
-    if let Some(assertion) = new.assertion {
-        subjects.push(&assertion.subject);
     }
     tx.execute(
         "INSERT INTO memory_search(memory_id,revision,title,claim,subjects) VALUES(?1,?2,?3,?4,?5)",
-        params![id, revision, new.title, new.claim, subjects.join(" ")],
+        params![
+            id,
+            revision,
+            new.title,
+            new.claim,
+            search_subjects(new.evidence, new.assertion)
+        ],
     )?;
     Ok(())
 }

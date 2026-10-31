@@ -4,7 +4,7 @@ This page is the contract between the release workflow, the installers and anyon
 
 ## Versions and tags
 
-- A release version is the Cargo workspace version: `MAJOR.MINOR.PATCH`, optionally `-PRERELEASE` (for example `0.2.0-preview.1`).
+- A release version is the Cargo workspace version: `MAJOR.MINOR.PATCH`, optionally `-PRERELEASE` (for example `0.1.1-preview.1`).
 - Its Git tag is `v<version>`. The workflow refuses a tag that differs from the Cargo version.
 - A version with a `-` suffix is published as a GitHub pre-release. GitHub's `releases/latest` never points at a pre-release, so the installers install a preview only when it is pinned with `--version` / `-Version`.
 

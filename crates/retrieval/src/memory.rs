@@ -6,6 +6,7 @@
 //! reviews, supersession and retirement are separate explicit write commands,
 //! and every read (list, show, history, search, verify, conflicts) is
 //! read-only and computes verification live without persisting it.
+mod backup;
 mod capture;
 mod conflicts;
 mod render;
@@ -19,10 +20,22 @@ use code_intel_core::memory::{
     MAX_NOTE_BYTES, MAX_TITLE_BYTES, MEMORY_NOTICE, Memory, MemoryEvent, MemoryStatus, MemoryType,
     Revision, RevisionState, utc_now,
 };
-use code_intel_store::{Act, Decision, MemoryError, MemoryFilter, NewRevision, Store};
+use code_intel_store::{Act, Decision, MemoryError, MemoryFilter, MemoryStore, NewRevision, Store};
 use serde::Serialize;
 
+pub use backup::{
+    EXPORT_FORMAT, EXPORT_FORMAT_VERSION, Export, ExportCounts, ExportEvent, ExportMemory,
+    ExportRevision, ExportSource, ImportMode, ImportReport, Integrity, MAX_IMPORT_BYTES,
+    MigrateReport, StatusReport, export, import, migrate, payload_digest, read_export, status,
+    validate, write_file,
+};
 pub use capture::Selector;
+
+/// Printed with every export: what a backup contains and what its digest means.
+#[must_use]
+pub const fn backup_notice() -> &'static str {
+    backup::EXPORT_NOTICE
+}
 pub use conflicts::{Conflict, ConflictEvidence, Conflicts, conflicts};
 pub use render::{Fit, receipt as render_receipt, render};
 pub use verify::{EvidenceCheck, MemoryCheck, State};
@@ -50,6 +63,14 @@ pub struct Note {
     pub detail: String,
 }
 
+/// What memory reads see: the memory store and, when it exists, the code
+/// index. Without an index, evidence is reported `unverified`, never current.
+#[derive(Clone, Copy)]
+pub struct Stores<'a> {
+    pub memory: &'a MemoryStore,
+    pub index: Option<&'a Store>,
+}
+
 fn fail<T>(code: &'static str, message: impl Into<String>) -> Result<T> {
     Err(MemoryError {
         code,
@@ -68,20 +89,7 @@ fn indexed_hash(store: &Store, path: &str) -> Result<Option<String>> {
     }
 }
 
-/// BLAKE3 over the claim fields and every evidence snapshot: approving a
-/// digest approves exactly that claim and that evidence.
-#[must_use]
-pub fn revision_digest(
-    memory_type: MemoryType,
-    title: &str,
-    claim: &str,
-    assertion: Option<&Assertion>,
-    evidence: &[EvidenceSnapshot],
-) -> String {
-    let canonical = serde_json::to_vec(&(memory_type, title, claim, assertion, evidence))
-        .expect("memory revision serializes");
-    blake3::hash(&canonical).to_hex().to_string()
-}
+pub use code_intel_core::memory::revision_digest;
 
 /// The content of a proposal or correction, before evidence capture.
 #[derive(Debug, Clone)]
@@ -172,7 +180,11 @@ fn assertion(value: Option<&str>) -> Result<Option<Assertion>> {
 }
 
 /// Capture every selector by value against the current index and working tree.
-fn capture_all(store: &Store, draft: &Draft) -> Result<(Option<Assertion>, Vec<EvidenceSnapshot>)> {
+fn capture_all(
+    store: &Store,
+    root: &str,
+    draft: &Draft,
+) -> Result<(Option<Assertion>, Vec<EvidenceSnapshot>)> {
     text("title", &draft.title, MAX_TITLE_BYTES)?;
     text("claim", &draft.claim, MAX_CLAIM_BYTES)?;
     let assertion = assertion(draft.assertion.as_deref())?;
@@ -188,10 +200,7 @@ fn capture_all(store: &Store, draft: &Draft) -> Result<(Option<Assertion>, Vec<E
             format!("at most {MAX_EVIDENCE} evidence items per revision"),
         );
     }
-    let root = store.root()?.map(std::path::PathBuf::from);
-    let Some(root) = root else {
-        return fail("index_unreadable", "the index records no repository root");
-    };
+    let root = std::path::PathBuf::from(root);
     let mut evidence: Vec<EvidenceSnapshot> = Vec::new();
     for (selector, role) in draft
         .evidence
@@ -229,7 +238,7 @@ pub struct Receipt {
 }
 
 fn receipt(
-    store: &Store,
+    store: &MemoryStore,
     action: &'static str,
     id: &str,
     revision: Option<u32>,
@@ -252,9 +261,14 @@ fn receipt(
 }
 
 /// Create a pending memory. It is not authoritative until explicitly approved.
-pub fn propose(store: &mut Store, draft: &Draft, author: &str) -> Result<Receipt> {
+pub fn propose(
+    store: &mut MemoryStore,
+    index: &Store,
+    draft: &Draft,
+    author: &str,
+) -> Result<Receipt> {
     validate_actor(author)?;
-    let (assertion, evidence) = capture_all(store, draft)?;
+    let (assertion, evidence) = capture_all(index, store.root(), draft)?;
     let digest = revision_digest(
         draft.memory_type,
         &draft.title,
@@ -274,7 +288,7 @@ pub fn propose(store: &mut Store, draft: &Draft, author: &str) -> Result<Receipt
             });
         }
     }
-    let index_revision = store.revision()?;
+    let index_revision = index.revision()?;
     let at = utc_now();
     let id = store.memory_propose(
         &NewRevision {
@@ -306,7 +320,8 @@ pub fn propose(store: &mut Store, draft: &Draft, author: &str) -> Result<Receipt
 /// Propose a corrected revision of an approved memory. The approved revision
 /// stays authoritative, and its evidence snapshot unchanged, until review.
 pub fn correct(
-    store: &mut Store,
+    store: &mut MemoryStore,
+    index: &Store,
     id: &str,
     draft: &Draft,
     reason: &str,
@@ -331,7 +346,7 @@ pub fn correct(
             ),
         );
     }
-    let (assertion, evidence) = capture_all(store, draft)?;
+    let (assertion, evidence) = capture_all(index, store.root(), draft)?;
     let digest = revision_digest(
         draft.memory_type,
         &draft.title,
@@ -339,7 +354,7 @@ pub fn correct(
         assertion.as_ref(),
         &evidence,
     );
-    let index_revision = store.revision()?;
+    let index_revision = index.revision()?;
     let at = utc_now();
     let revision = store.memory_correct(
         id,
@@ -375,10 +390,16 @@ pub fn correct(
     Ok(receipt)
 }
 
-/// Approve or reject the pending revision named by its digest. Approval also
-/// requires every backing evidence item to verify `current` right now.
+/// Approve or reject the pending revision named by its digest.
+///
+/// Approval is checked inside the memory write transaction: under that lock
+/// the pending revision and its digest are re-read, the stored digest is
+/// recomputed from the stored claim and evidence, and every backing item is
+/// re-verified against one read snapshot of the index and the working tree.
+/// Only if all of that holds are the approval and its event committed.
 pub fn review(
-    store: &mut Store,
+    store: &mut MemoryStore,
+    index: Option<&Store>,
     id: &str,
     digest: &str,
     decision: Decision,
@@ -399,29 +420,26 @@ pub fn review(
             "pass at least 12 lowercase hex characters of the pending revision digest",
         );
     }
-    let Some(memory) = store.memory(id)? else {
+    if store.memory(id)?.is_none() {
         return fail(
             "memory_not_found",
             format!("no memory {id} in this repository"),
         );
-    };
-    let mut state = None;
-    let mut detail = std::collections::BTreeMap::new();
-    if decision == Decision::Approve {
-        let Some(pending) = memory.pending_revision else {
-            return fail(
-                "nothing_to_review",
-                format!("{id} has no revision awaiting review"),
-            );
-        };
-        let check = approval_check(store, id, pending)?;
-        detail.insert("verification".to_owned(), check.state.label().to_owned());
-        detail.insert(
-            "index_revision".to_owned(),
-            check.index_revision.to_string(),
-        );
-        state = Some(check.state);
     }
+    let mut state = None;
+    let root = store.root().to_owned();
+    let mut check = |revision: &Revision| -> Result<std::collections::BTreeMap<String, String>> {
+        let mut detail = std::collections::BTreeMap::new();
+        if decision == Decision::Approve {
+            let check = approval_check(&root, index, id, revision)?;
+            detail.insert("verification".to_owned(), check.state.label().to_owned());
+            if let Some(index_revision) = check.index_revision {
+                detail.insert("index_revision".to_owned(), index_revision.to_string());
+            }
+            state = Some(check.state);
+        }
+        Ok(detail)
+    };
     let at = utc_now();
     let revision = store.memory_review(
         id,
@@ -431,8 +449,9 @@ pub fn review(
             actor: reviewer,
             at: &at,
             note,
-            detail: (!detail.is_empty()).then_some(detail),
+            detail: None,
         },
+        &mut check,
     )?;
     let full = store.memory_revision(id, revision)?.map(|r| r.digest);
     let mut receipt = receipt(
@@ -449,12 +468,30 @@ pub fn review(
     Ok(receipt)
 }
 
-/// Approval re-verifies the pending revision: it needs backing evidence, and
-/// every backing item must still be current.
-fn approval_check(store: &Store, id: &str, pending: u32) -> Result<MemoryCheck> {
-    let revision = store
-        .memory_revision(id, pending)?
-        .ok_or_else(|| anyhow::anyhow!("pending revision missing"))?;
+/// Approval needs an intact digest, backing evidence, and every backing item
+/// still current in the index and working tree.
+fn approval_check(
+    root: &str,
+    index: Option<&Store>,
+    id: &str,
+    revision: &Revision,
+) -> Result<MemoryCheck> {
+    let pending = revision.revision;
+    let recomputed = revision_digest(
+        revision.memory_type,
+        &revision.title,
+        &revision.claim,
+        revision.assertion.as_ref(),
+        &revision.evidence,
+    );
+    if recomputed != revision.digest {
+        return fail(
+            "digest_invalid",
+            format!(
+                "{id} revision {pending}'s stored digest does not match its stored claim and evidence; the store may be damaged; it cannot be approved"
+            ),
+        );
+    }
     if !revision
         .evidence
         .iter()
@@ -465,8 +502,14 @@ fn approval_check(store: &Store, id: &str, pending: u32) -> Result<MemoryCheck> 
             format!("{id} revision {pending} has no backing evidence; it cannot be approved"),
         );
     }
-    let mut checker = verify::Checker::new(store)?;
-    let check = checker.revision(&revision)?;
+    let Some(index) = index else {
+        return fail(
+            "index_required",
+            "approval re-verifies evidence against the code index; run `repogi index <path>` first",
+        );
+    };
+    let mut checker = verify::Checker::with_root(index, root)?;
+    let check = checker.revision(revision)?;
     let changed: Vec<String> = check
         .evidence
         .iter()
@@ -495,7 +538,7 @@ fn approval_check(store: &Store, id: &str, pending: u32) -> Result<MemoryCheck> 
 }
 
 pub fn supersede(
-    store: &mut Store,
+    store: &mut MemoryStore,
     old: &str,
     new: &str,
     reviewer: &str,
@@ -526,7 +569,7 @@ pub fn supersede(
     Ok(receipt)
 }
 
-pub fn retire(store: &mut Store, id: &str, reviewer: &str, reason: &str) -> Result<Receipt> {
+pub fn retire(store: &mut MemoryStore, id: &str, reviewer: &str, reason: &str) -> Result<Receipt> {
     validate_id(id)?;
     validate_actor(reviewer)?;
     text("reason", reason, MAX_NOTE_BYTES)?;
@@ -549,17 +592,38 @@ pub struct Header {
     pub schema_version: u32,
     pub kind: &'static str,
     pub repository_root: Option<String>,
-    pub index_revision: u64,
+    /// Absent when there is no code index (verification is degraded then).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_revision: Option<u64>,
     pub notice: &'static str,
+    /// Storage caveats: no index, or memories not yet migrated out of it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub storage: Vec<Note>,
 }
 
-fn header(store: &Store, kind: &'static str) -> Result<Header> {
+fn header(stores: Stores<'_>, kind: &'static str) -> Result<Header> {
+    let mut storage: Vec<Note> = stores
+        .memory
+        .notes()
+        .iter()
+        .map(|(code, detail)| Note {
+            code,
+            detail: detail.clone(),
+        })
+        .collect();
+    if stores.index.is_none() {
+        storage.push(Note {
+            code: "index_unavailable",
+            detail: "no code index: memories and history are shown, but evidence cannot be verified; run `repogi index <path>`".into(),
+        });
+    }
     Ok(Header {
         schema_version: SCHEMA_VERSION,
         kind,
-        repository_root: store.root()?,
-        index_revision: store.revision()?,
+        repository_root: Some(stores.memory.root().to_owned()),
+        index_revision: stores.index.map(Store::revision).transpose()?,
         notice: MEMORY_NOTICE,
+        storage,
     })
 }
 
@@ -613,7 +677,7 @@ fn shown_revision(memory: &Memory) -> u32 {
         .unwrap_or(memory.latest_revision)
 }
 
-fn load(store: &Store, id: &str) -> Result<Memory> {
+fn load(store: &MemoryStore, id: &str) -> Result<Memory> {
     validate_id(id)?;
     store.memory(id)?.map_or_else(
         || {
@@ -626,7 +690,7 @@ fn load(store: &Store, id: &str) -> Result<Memory> {
     )
 }
 
-fn revision(store: &Store, id: &str, number: u32) -> Result<Revision> {
+fn revision(store: &MemoryStore, id: &str, number: u32) -> Result<Revision> {
     store
         .memory_revision(id, number)?
         .ok_or_else(|| anyhow::anyhow!("memory {id} revision {number} is missing"))
@@ -706,12 +770,13 @@ pub struct Listing {
 
 /// Bounded listing without verification. Default: every status.
 pub fn list(
-    store: &Store,
+    stores: Stores<'_>,
     statuses: Vec<MemoryStatus>,
     memory_type: Option<MemoryType>,
     after: Option<String>,
     limit: usize,
 ) -> Result<Listing> {
+    let store = stores.memory;
     if let Some(after) = &after {
         validate_id(after)?;
     }
@@ -733,7 +798,7 @@ pub fn list(
         memories.push(summary(memory, &shown));
     }
     Ok(Listing {
-        header: header(store, "memory_list")?,
+        header: header(stores, "memory_list")?,
         statuses,
         memory_type,
         next_after: more.then(|| rows.last().map(|m| m.id.clone())).flatten(),
@@ -822,9 +887,10 @@ pub struct Detail {
 }
 
 /// One memory with its approved and pending revisions, verified live.
-pub fn show(store: &Store, id: &str) -> Result<Detail> {
+pub fn show(stores: Stores<'_>, id: &str) -> Result<Detail> {
+    let store = stores.memory;
     let memory = load(store, id)?;
-    let mut checker = verify::Checker::new(store)?;
+    let mut checker = verify::Checker::new(stores)?;
     let shown = revision(store, id, shown_revision(&memory))?;
     let mut approved = None;
     let mut approved_check = None;
@@ -853,7 +919,7 @@ pub fn show(store: &Store, id: &str) -> Result<Detail> {
         approved_check = Some(check);
     }
     Ok(Detail {
-        header: header(store, "memory")?,
+        header: header(stores, "memory")?,
         warnings: warnings(&memory, &shown, approved_check.as_ref()),
         memory: summary(&memory, &shown),
         approved,
@@ -892,20 +958,69 @@ pub struct History {
     pub events: Vec<MemoryEvent>,
     pub omitted_revisions: usize,
     pub omitted_events: usize,
+    /// For a memory imported for review: the complete source history, kept
+    /// as history only (its approvals are not approvals here).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<ImportedFrom>,
     pub truncated: bool,
     pub max_bytes: usize,
     pub used_bytes: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportedFrom {
+    pub export_digest: String,
+    pub source_memory: String,
+    pub source_status: MemoryStatus,
+    /// Newest first.
+    pub revisions: Vec<RevisionLine>,
+    /// Oldest first.
+    pub events: Vec<backup::ExportEvent>,
+    pub omitted_events: usize,
+}
+
 /// Every revision (claims are never rewritten) and the append-only review log.
-pub fn history(store: &Store, id: &str, limit: usize) -> Result<History> {
+pub fn history(stores: Stores<'_>, id: &str, limit: usize) -> Result<History> {
+    let store = stores.memory;
     let memory = load(store, id)?;
     let limit = limit.clamp(1, MAX_HISTORY);
     let revisions = store.memory_revisions(id, u32::try_from(limit)?)?;
     let total_events = usize::try_from(store.memory_event_count(id)?)?;
     let events = store.memory_events(id, 0, u32::try_from(limit)?)?;
+    let imported_from = match store.imported_history(id)? {
+        Some((export_digest, data)) => {
+            let source = backup::archived(&data)?;
+            let shown = source.events.len().min(limit);
+            Some(ImportedFrom {
+                export_digest,
+                source_status: source.status,
+                revisions: source
+                    .revisions
+                    .iter()
+                    .rev()
+                    .take(limit)
+                    .map(|r| RevisionLine {
+                        revision: r.revision,
+                        state: r.state,
+                        digest: r.digest.clone(),
+                        title: r.title.clone(),
+                        claim: r.claim.clone(),
+                        created_at: r.created_at.clone(),
+                        proposed_by: r.proposed_by.clone(),
+                        reason: r.reason.clone(),
+                        evidence: r.evidence.len(),
+                    })
+                    .collect(),
+                omitted_events: source.events.len() - shown,
+                events: source.events.into_iter().take(shown).collect(),
+                source_memory: source.id,
+            })
+        }
+        None => None,
+    };
     Ok(History {
-        header: header(store, "memory_history")?,
+        imported_from,
+        header: header(stores, "memory_history")?,
         id: memory.id.clone(),
         status: memory.status,
         omitted_revisions: usize::try_from(memory.latest_revision)?.saturating_sub(revisions.len()),
@@ -977,12 +1092,13 @@ pub struct Search {
 /// FTS5 over memory titles, claims and cited IDs/paths. Default: approved
 /// memories only. Others are labelled and never authoritative.
 pub fn search(
-    store: &Store,
+    stores: Stores<'_>,
     query: &str,
     statuses: Vec<MemoryStatus>,
     include_unreviewed: bool,
     limit: usize,
 ) -> Result<Search> {
+    let store = stores.memory;
     if query.len() > MAX_QUERY_BYTES || query.chars().any(char::is_control) {
         return fail(
             "invalid_arguments",
@@ -1030,7 +1146,7 @@ pub fn search(
     let candidate_limit_reached = hits.len() > candidates;
     hits.truncate(candidates);
     let total = hits.len();
-    let mut checker = verify::Checker::new(store)?;
+    let mut checker = verify::Checker::new(stores)?;
     let mut results = Vec::new();
     for (hit, mode) in hits.into_iter().take(limit) {
         store.check_cancelled()?;
@@ -1042,7 +1158,7 @@ pub fn search(
         results.push(view);
     }
     Ok(Search {
-        header: header(store, "memory_search")?,
+        header: header(stores, "memory_search")?,
         query: query.to_owned(),
         statuses,
         include_unreviewed,
@@ -1116,11 +1232,12 @@ pub struct Verification {
 
 /// Verify the authoritative (else pending) revision of each memory. Read-only.
 pub fn verify(
-    store: &Store,
+    stores: Stores<'_>,
     ids: &[String],
     all_approved: bool,
     limit: usize,
 ) -> Result<Verification> {
+    let store = stores.memory;
     let limit = limit.clamp(1, MAX_LIMIT);
     let mut memories = Vec::new();
     let mut omitted = 0;
@@ -1139,7 +1256,7 @@ pub fn verify(
         memories.push(load(store, id)?);
     }
     omitted += ids.len().saturating_sub(limit);
-    let mut checker = verify::Checker::new(store)?;
+    let mut checker = verify::Checker::new(stores)?;
     let mut results = Vec::new();
     for memory in memories {
         store.check_cancelled()?;
@@ -1154,7 +1271,7 @@ pub fn verify(
         });
     }
     Ok(Verification {
-        header: header(store, "memory_verification")?,
+        header: header(stores, "memory_verification")?,
         recorded: false,
         results,
         omitted,
@@ -1168,7 +1285,7 @@ pub fn verify(
 /// Append each result to its memory's history as a `verified` event. This is
 /// an explicit write; it never changes a claim, status or evidence snapshot.
 pub fn record_verification(
-    store: &mut Store,
+    store: &mut MemoryStore,
     verification: &mut Verification,
     actor: &str,
 ) -> Result<()> {
@@ -1181,10 +1298,9 @@ pub fn record_verification(
             result.verification.label().to_owned(),
         );
         detail.insert("revision".to_owned(), result.revision.to_string());
-        detail.insert(
-            "index_revision".to_owned(),
-            verification.header.index_revision.to_string(),
-        );
+        if let Some(index_revision) = verification.header.index_revision {
+            detail.insert("index_revision".to_owned(), index_revision.to_string());
+        }
         let changed: Vec<String> = result
             .evidence
             .iter()
@@ -1231,11 +1347,12 @@ pub(crate) struct Recall {
 /// Identity and text together rank first, then identity alone by plan
 /// priority, then text alone. Bounded candidates; read-only.
 pub(crate) fn relevant(
-    store: &Store,
+    stores: Stores<'_>,
     relevance: &Relevance<'_>,
     limit: usize,
 ) -> Result<Vec<Recall>> {
     const CANDIDATES: u32 = 32;
+    let store = stores.memory;
     let mut ids: Vec<String> = store.memories_citing(relevance.subjects, CANDIDATES)?;
     if !relevance.terms.is_empty() {
         let any = relevance
@@ -1300,7 +1417,7 @@ pub(crate) fn relevant(
         ));
     }
     ranked.sort_by(|a, b| (a.0, a.1, a.2, &a.3.id).cmp(&(b.0, b.1, b.2, &b.3.id)));
-    let mut checker = verify::Checker::new(store)?;
+    let mut checker = verify::Checker::new(stores)?;
     let mut found = Vec::new();
     for (_, _, _, memory, revision, rule) in ranked.into_iter().take(limit) {
         let check = checker.revision(&revision)?;
