@@ -139,6 +139,9 @@ fn evidence_classes_stay_distinct_and_lexical_matches_are_never_relationships() 
                     assert!(evidence.relationship.as_ref().unwrap().target_id.is_none());
                 }
                 EvidenceClass::StaleReference => {}
+                EvidenceClass::ApprovedProjectMemory => {
+                    panic!("memory evidence in a plan that did not request it: {evidence:?}")
+                }
             }
             let source = fs::read(root.path().join(&evidence.citation.path)).unwrap();
             assert!(evidence.citation.end_byte <= source.len());

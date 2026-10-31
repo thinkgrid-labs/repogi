@@ -29,9 +29,9 @@ pub const ALL_TOOLS: [&str; 5] = [
     "atlas_status",
 ];
 
-/// Every tool `--tools` can select. Impact, knowledge trace and investigation
-/// are opt-in: no profile lists them, so default clients see no new schema.
-pub const SELECTABLE_TOOLS: [&str; 8] = [
+/// Every tool `--tools` can select. Impact, knowledge trace, investigation and
+/// memory are opt-in: no profile lists them, so default clients see no new schema.
+pub const SELECTABLE_TOOLS: [&str; 9] = [
     "atlas_context",
     "atlas_symbol",
     "atlas_references",
@@ -39,11 +39,13 @@ pub const SELECTABLE_TOOLS: [&str; 8] = [
     "atlas_impact",
     "atlas_knowledge_trace",
     "atlas_investigate",
+    "atlas_memory",
     "atlas_status",
 ];
 
 const IMPACT_DEFAULT_BYTES: usize = 8000;
 const INVESTIGATE_DEFAULT_BYTES: usize = code_intel_retrieval::investigate::DEFAULT_BYTES;
+const MEMORY_DEFAULT_BYTES: usize = 8000;
 const IMPACT_MIN_BYTES: usize = 2000;
 const MAX_REVISION: usize = 256;
 const MAX_TEST_DIRS: usize = 16;
@@ -114,6 +116,9 @@ impl ToolError {
                     small.minimum
                 ),
             );
+        }
+        if let Some(memory) = error.downcast_ref::<code_intel_store::MemoryError>() {
+            return Self::new(memory.code, memory.message.clone());
         }
         error.downcast_ref::<NavigationError>().map_or_else(
             || Self::new(code, format!("{error:#}")),
@@ -208,6 +213,9 @@ impl Server {
         if self.tools.contains(&"atlas_investigate") {
             text.push_str(" atlas_investigate returns an advisory, evidence-backed plan of where to start a task; it runs nothing and proves nothing.");
         }
+        if self.tools.contains(&"atlas_memory") {
+            text.push_str(" atlas_memory reads developer-approved project memories with their evidence status; it cannot create or approve them, approval is not runtime proof, and stale memories never override current sources.");
+        }
         if self.tools.contains(&"atlas_references") {
             text.push_str(" atlas_references finds direct users of one declaration.");
         }
@@ -246,13 +254,17 @@ impl Server {
     ) -> Option<ToolOutput> {
         let response_budget = if name == "atlas_status" {
             MAX_BYTES
-        } else if name == "atlas_investigate" {
+        } else if name == "atlas_investigate" || name == "atlas_memory" {
             arguments
                 .get("max_bytes")
                 .and_then(Value::as_u64)
                 .and_then(|value| usize::try_from(value).ok())
                 .filter(|value| (MIN_BYTES..=MAX_BYTES).contains(value))
-                .unwrap_or(INVESTIGATE_DEFAULT_BYTES)
+                .unwrap_or(if name == "atlas_memory" {
+                    MEMORY_DEFAULT_BYTES
+                } else {
+                    INVESTIGATE_DEFAULT_BYTES
+                })
         } else if name == "atlas_impact" {
             arguments
                 .get("max_bytes")
@@ -279,6 +291,7 @@ impl Server {
             "atlas_impact" => self.impact(arguments, register),
             "atlas_knowledge_trace" => self.knowledge_trace(arguments, register),
             "atlas_investigate" => self.investigate(arguments, register),
+            "atlas_memory" => self.memory(arguments, register),
             "atlas_status" => self.status(arguments, register),
             _ => return None,
         };
@@ -490,6 +503,12 @@ impl Server {
                 format!("task exceeds {} UTF-8 bytes", investigate::MAX_TASK_BYTES),
             ));
         }
+        if args.include_memory.is_some() && !self.tools.contains(&"atlas_memory") {
+            return Err(ToolError::new(
+                "invalid_arguments",
+                "include_memory requires the opt-in atlas_memory tool",
+            ));
+        }
         let selectors = args.selectors.unwrap_or_default();
         if selectors.len() > investigate::MAX_SELECTORS
             || selectors.iter().any(|s| s.len() > MAX_TEXT)
@@ -510,11 +529,108 @@ impl Server {
             max_steps: args.max_steps.unwrap_or(investigate::DEFAULT_STEPS),
             max_bytes,
             ranking: investigate::Ranking::Balanced,
+            include_memory: args.include_memory.unwrap_or(false),
         };
         let response = investigate::investigate(&store, &request, format)
             .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))?;
         investigate::render(&response, format)
             .map_err(|e| ToolError::from_anyhow("investigation_failed", &e))
+    }
+
+    /// Read-only access to reviewed project memory; no write operation exists here.
+    fn memory(&self, arguments: Value, register: &dyn Fn(Interrupt)) -> ToolResult {
+        use code_intel_core::memory::{MemoryStatus, MemoryType};
+        use code_intel_retrieval::memory;
+        let args: MemoryArgs = parse(arguments)?;
+        let max_bytes = match args.max_bytes {
+            None => MEMORY_DEFAULT_BYTES,
+            requested => budget(requested)?,
+        };
+        let format = match args.format.as_deref() {
+            None | Some("agent") => Format::Text,
+            Some("json") => Format::Json,
+            _ => {
+                return Err(ToolError::new(
+                    "invalid_arguments",
+                    "format must be agent or json",
+                ));
+            }
+        };
+        let invalid = |message: &str| ToolError::new("invalid_arguments", message);
+        let statuses = args
+            .status
+            .unwrap_or_default()
+            .iter()
+            .map(|s| MemoryStatus::parse(s).ok_or_else(|| invalid("unknown status")))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let memory_type = args
+            .memory_type
+            .as_deref()
+            .map(|t| MemoryType::parse(t).ok_or_else(|| invalid("unknown memory type")))
+            .transpose()?;
+        let limit = args.limit.unwrap_or(10);
+        if !(1..=memory::MAX_LIMIT).contains(&limit) {
+            return Err(invalid("limit must be between 1 and 100"));
+        }
+        let only = |allowed: &[&str]| -> std::result::Result<(), ToolError> {
+            let given = [
+                ("query", args.query.is_some()),
+                ("id", args.id.is_some()),
+                ("status", !statuses.is_empty()),
+                ("type", memory_type.is_some()),
+                ("include_unreviewed", args.include_unreviewed.is_some()),
+                ("after", args.after.is_some()),
+                ("limit", args.limit.is_some()),
+            ];
+            match given
+                .iter()
+                .find(|(name, set)| *set && !allowed.contains(name))
+            {
+                Some((name, _)) => Err(invalid(&format!(
+                    "`{name}` does not apply to operation {}",
+                    args.operation
+                ))),
+                None => Ok(()),
+            }
+        };
+        let failed = |e: anyhow::Error| ToolError::from_anyhow("memory_failed", &e);
+        match args.operation.as_str() {
+            "search" => only(&["query", "status", "include_unreviewed", "limit"])?,
+            "get" => only(&["id"])?,
+            "list" => only(&["status", "type", "after", "limit"])?,
+            "history" => only(&["id", "limit"])?,
+            _ => return Err(invalid("operation must be search, get, list or history")),
+        }
+        let (store, _) = self.open(args.root.as_deref(), register)?;
+        match args.operation.as_str() {
+            "search" => {
+                let query = args.query.ok_or_else(|| invalid("search needs `query`"))?;
+                let mut response = memory::search(
+                    &store,
+                    &query,
+                    statuses,
+                    args.include_unreviewed.unwrap_or(false),
+                    limit,
+                )
+                .map_err(failed)?;
+                memory::render(&mut response, format, max_bytes).map_err(failed)
+            }
+            "get" => {
+                let id = args.id.ok_or_else(|| invalid("get needs `id`"))?;
+                let mut response = memory::show(&store, &id).map_err(failed)?;
+                memory::render(&mut response, format, max_bytes).map_err(failed)
+            }
+            "history" => {
+                let id = args.id.ok_or_else(|| invalid("history needs `id`"))?;
+                let mut response = memory::history(&store, &id, limit).map_err(failed)?;
+                memory::render(&mut response, format, max_bytes).map_err(failed)
+            }
+            _ => {
+                let mut response = memory::list(&store, statuses, memory_type, args.after, limit)
+                    .map_err(failed)?;
+                memory::render(&mut response, format, max_bytes).map_err(failed)
+            }
+        }
     }
 
     fn context(&self, arguments: Value, register: &dyn Fn(Interrupt)) -> ToolResult {
@@ -1378,6 +1494,24 @@ struct InvestigateArgs {
     max_bytes: Option<usize>,
     format: Option<String>,
     root: Option<String>,
+    include_memory: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryArgs {
+    operation: String,
+    query: Option<String>,
+    id: Option<String>,
+    status: Option<Vec<String>>,
+    #[serde(rename = "type")]
+    memory_type: Option<String>,
+    include_unreviewed: Option<bool>,
+    limit: Option<usize>,
+    after: Option<String>,
+    max_bytes: Option<usize>,
+    format: Option<String>,
+    root: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1396,7 +1530,17 @@ pub fn definitions(profile: Profile, enabled: &[&str], multi_root: bool) -> Valu
         full: profile == Profile::Full,
         multi_root,
     };
-    Value::Array(enabled.iter().map(|name| kit.tool(name)).collect())
+    let mut tools: Vec<Value> = enabled.iter().map(|name| kit.tool(name)).collect();
+    // Investigation can include memory only when memory itself is enabled, so
+    // existing atlas_investigate schemas stay byte-identical.
+    if enabled.contains(&"atlas_memory") {
+        for tool in &mut tools {
+            if tool["name"] == "atlas_investigate" {
+                tool["inputSchema"]["properties"]["include_memory"] = json!({"type":"boolean","default":false,"description":"Add approved project memories as separately classed evidence with their verification status."});
+            }
+        }
+    }
+    Value::Array(tools)
 }
 
 /// Shared schema fragments for one profile.
@@ -1436,6 +1580,12 @@ impl Kit {
                 "Advisory plan for a task: ordered steps naming code, requirements, decisions, consumers and test candidates, each citing indexed evidence and uncertainty. Runs nothing; validated claims and static test links prove neither behavior nor coverage.",
                 Self::investigate_properties(),
                 &["task"],
+            ),
+            "atlas_memory" => (
+                "Atlas: project memory",
+                "Developer-approved project memories: reviewed claims with source citations, live evidence status (current, stale, missing, unresolved, unverified) and history. Read-only; cannot propose or approve. Approval is not runtime proof; stale memories never override current code.",
+                Self::memory_properties(),
+                &["operation"],
             ),
             "atlas_symbol" => (
                 "Atlas: symbol source",
@@ -1485,6 +1635,9 @@ impl Kit {
         let mut properties = self.shared(properties, name != "atlas_status");
         if name == "atlas_investigate" {
             properties["max_bytes"]["default"] = json!(INVESTIGATE_DEFAULT_BYTES);
+        }
+        if name == "atlas_memory" {
+            properties["max_bytes"]["default"] = json!(MEMORY_DEFAULT_BYTES);
         }
         if name == "atlas_impact" {
             properties["manifest"] = json!({"type":"boolean","description":"Prepare a complete verification artifact descriptor; conflicts with tests/summary/detail/evidence_file. JSON; retrieve bytes with artifact."});
@@ -1543,6 +1696,22 @@ impl Kit {
             "selectors": {"type":"array","items":{"type":"string","maxLength":MAX_TEXT},"maxItems":MAX_SELECTORS,"description":"Exact entity, REQ-/ADR- or fact IDs to focus on."},
             "depth": {"type":"integer","minimum":1,"maximum":MAX_DEPTH,"default":DEFAULT_DEPTH},
             "max_steps": {"type":"integer","minimum":1,"maximum":MAX_STEPS,"default":DEFAULT_STEPS},
+        })
+    }
+
+    fn memory_properties() -> Value {
+        use code_intel_core::memory::{MemoryStatus, MemoryType};
+        let statuses: Vec<&str> = MemoryStatus::ALL.iter().map(|s| s.label()).collect();
+        let types: Vec<&str> = MemoryType::ALL.iter().map(|t| t.label()).collect();
+        json!({
+            "operation": {"type":"string","enum":["search","get","list","history"],"description":"search: approved memories by words; get: one memory with evidence; list: by status/type; history: revisions and reviews."},
+            "query": {"type":"string","maxLength":code_intel_retrieval::memory::MAX_QUERY_BYTES},
+            "id": {"type":"string","pattern":"^mem-[0-9]{4,}$"},
+            "status": {"type":"array","items":{"type":"string","enum":statuses},"maxItems":5,"description":"search defaults to approved; others are never authoritative."},
+            "type": {"type":"string","enum":types},
+            "include_unreviewed": {"type":"boolean","default":false},
+            "limit": {"type":"integer","minimum":1,"maximum":code_intel_retrieval::memory::MAX_LIMIT,"default":10},
+            "after": {"type":"string","description":"list: continue after this memory ID."},
         })
     }
 

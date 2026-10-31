@@ -107,6 +107,23 @@ impl Store {
             .collect()
     }
 
+    /// One relationship by exact ID; never by similarity.
+    pub fn knowledge_relationship(&self, id: &str) -> Result<Option<KnowledgeRelationship>> {
+        ensure!(
+            self.relationships_available()?,
+            "knowledge relationships unavailable; run `repogi index <path>` first"
+        );
+        self.connection
+            .query_row(
+                "SELECT data FROM knowledge_relationships WHERE id=?1",
+                [id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|data| Ok(serde_json::from_str(&data)?))
+            .transpose()
+    }
+
     pub fn knowledge_section_owner(&self, path: &str, start: usize) -> Result<Option<String>> {
         self.check_cancelled()?;
         let mut q = self.connection.prepare("SELECT id FROM knowledge_entities WHERE path=?1 AND json_extract(data,'$.kind') IN ('requirement','architecture_decision') AND json_extract(data,'$.source.start_byte')<=?2 AND json_extract(data,'$.source.end_byte')>?2 ORDER BY json_extract(data,'$.source.start_byte') DESC,id LIMIT 1")?;

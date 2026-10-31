@@ -1,5 +1,6 @@
 mod manifest_artifact;
 mod mcp;
+mod memory_command;
 
 use std::{
     io::{self, Write},
@@ -92,6 +93,16 @@ enum Command {
         /// Evaluation control: step selection by category balance or evidence tier only.
         #[arg(long, value_enum, default_value_t = InvestigationRanking::Balanced, hide = true)]
         ranking: InvestigationRanking,
+        /// Add approved project memories as separately classed, read-only evidence.
+        #[arg(long)]
+        include_memory: bool,
+    },
+    /// Reviewed project memory. list/show/history/search/verify/conflicts are
+    /// read-only; propose/correct/approve/reject/supersede/retire are explicit
+    /// writes, and review writes need a digest and a named reviewer.
+    Memory {
+        #[command(subcommand)]
+        command: memory_command::MemoryCommand,
     },
     /// Compare two Git states and report the declarations and files that may be
     /// affected, with static evidence. Read-only: writes only its snapshot cache.
@@ -221,16 +232,20 @@ fn main() -> ExitCode {
         Ok(output) => match io::stdout().lock().write_all(output.as_bytes()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
-            Err(error) => fail(&format!("write output: {error}")),
+            Err(error) => fail("command_failed", &format!("write output: {error}")),
         },
-        Err(error) => fail(&format!("{error:#}")),
+        // Memory failures keep their stable code; everything else is unchanged.
+        Err(error) => match error.downcast_ref::<code_intel_store::MemoryError>() {
+            Some(memory) => fail(memory.code, &memory.message),
+            None => fail("command_failed", &format!("{error:#}")),
+        },
     }
 }
 
-fn fail(message: &str) -> ExitCode {
+fn fail(code: &str, message: &str) -> ExitCode {
     eprintln!(
         "{}",
-        serde_json::json!({"schema_version":1,"error":{"code":"command_failed","message":message}})
+        serde_json::json!({"schema_version":1,"error":{"code":code,"message":message}})
     );
     ExitCode::FAILURE
 }
@@ -356,6 +371,7 @@ fn run(cli: Cli) -> Result<String> {
             max_steps,
             depth,
             ranking,
+            include_memory,
         } => {
             let store = open_nearest()?;
             let (format, default) = match format {
@@ -372,10 +388,12 @@ fn run(cli: Cli) -> Result<String> {
                     InvestigationRanking::Balanced => investigate::Ranking::Balanced,
                     InvestigationRanking::Tiered => investigate::Ranking::Tiered,
                 },
+                include_memory,
             };
             let response = investigate::investigate(&store, &request, format)?;
             investigate::render(&response, format)
         }
+        Command::Memory { command } => memory_command::run(command),
         Command::Status => {
             let store = open_nearest()?;
             Ok(format!("{}\n", serde_json::to_string(&store.status()?)?))

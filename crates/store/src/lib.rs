@@ -1,9 +1,13 @@
 //! SQLite persistence, versioned schema, FTS5, and bounded graph reads.
 mod knowledge;
+mod memory;
 mod relationships;
 mod semantic;
 
 pub use knowledge::DocumentUpdate;
+pub use memory::{
+    Act, AssertionClash, Decision, MemoryError, MemoryFilter, MemoryHit, NewRevision,
+};
 
 pub use semantic::profile;
 
@@ -23,8 +27,9 @@ use code_intel_core::{Edge, Fact, IndexReport, IndexedFile, SCHEMA_VERSION, Stat
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 const MIGRATION_1: &str = include_str!("migration_1.sql");
-const DATABASE_VERSION: u32 = 4;
+const DATABASE_VERSION: u32 = 5;
 const MIGRATION_4: &str = include_str!("migration_4.sql");
+const MIGRATION_5: &str = include_str!("migration_5.sql");
 const MIGRATION_2: &str = include_str!("migration_2.sql");
 const MIGRATION_3: &str = include_str!("migration_3.sql");
 
@@ -112,6 +117,9 @@ impl Store {
             }
             if version < 4 {
                 transaction.execute_batch(MIGRATION_4)?;
+            }
+            if version < 5 {
+                transaction.execute_batch(MIGRATION_5)?;
             }
             transaction.pragma_update(None, "user_version", DATABASE_VERSION)?;
             transaction.commit()?;
@@ -257,6 +265,23 @@ impl Store {
         let mut query = self.connection.prepare("SELECT data FROM semantic_edges WHERE source_id=?1 AND json_extract(data,'$.status')='resolved' AND json_extract(data,'$.kind') IN ('CALLS','REFERENCES','EXTENDS') ORDER BY ordinal LIMIT ?2").context("semantic graph unavailable; re-index this repository")?;
         query
             .query_map(params![source, limit], |row| row.get::<_, String>(0))?
+            .map(|data| Ok(serde_json::from_str(&data?)?))
+            .collect()
+    }
+
+    /// Resolved typed edges from one exact fact to another, in source order.
+    pub fn semantic_edges_between(
+        &self,
+        source: &str,
+        target: &str,
+        limit: u32,
+    ) -> Result<Vec<SemanticEdge>> {
+        self.check_cancelled()?;
+        let mut query = self.connection.prepare("SELECT data FROM semantic_edges WHERE source_id=?1 AND target_id=?2 AND json_extract(data,'$.status')='resolved' ORDER BY ordinal LIMIT ?3").context("semantic graph unavailable; re-index this repository")?;
+        query
+            .query_map(params![source, target, limit], |row| {
+                row.get::<_, String>(0)
+            })?
             .map(|data| Ok(serde_json::from_str(&data?)?))
             .collect()
     }

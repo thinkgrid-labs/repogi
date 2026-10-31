@@ -1,0 +1,66 @@
+{
+  "notes": "Developer-written labels for the project-memory evaluation, written from the fixture design before scoring. Memory keys name proposals; the evaluator maps them to allocated IDs. Expected verification states are cumulative across mutations, which run in order.",
+  "memories": [
+    {"key": "sqlite", "type": "architecture_decision", "title": "Sessions persist in SQLite", "claim": "Session records are stored in an embedded SQLite database file; no external database server is required.", "evidence": [{"id": "ADR-0001"}, {"relationship": {"author": "ADR-0001", "kind": "DECLARED_IMPLEMENTATION"}}, {"source": "docs/ARCHITECTURE.md"}], "outcome": "approve"},
+    {"key": "inactivity", "type": "architecture_decision", "title": "Sessions expire after inactivity", "claim": "Sessions expire after a fixed period of inactivity, not a fixed time after login.", "evidence": [{"id": "ADR-0003"}, {"relationship": {"author": "ADR-0003", "kind": "SUPERSEDES"}}], "asserts": "ADR-0002=superseded", "outcome": "approve"},
+    {"key": "expiry", "type": "requirement", "title": "Expired sessions are rejected", "claim": "Expired sessions must be rejected by every consumer.", "evidence": [{"id": "REQ-AUTH-001"}, {"relationship": {"author": "REQ-AUTH-001", "kind": "DECLARED_IMPLEMENTATION"}}], "asserts": "REQ-AUTH-001=active", "outcome": "approve"},
+    {"key": "refresh", "type": "requirement", "title": "Token refresh needs an active session", "claim": "Access tokens are refreshed only for sessions that have not expired.", "evidence": [{"id": "REQ-AUTH-002"}], "outcome": "approve"},
+    {"key": "middleware", "type": "implementation_note", "title": "Middleware checks expiry", "claim": "Request middleware rejects expired sessions through isSessionExpired.", "evidence": [{"edge": {"source": ["src/api/middleware.ts", "requireSession"], "target": ["src/auth/session.ts", "isSessionExpired"]}}], "outcome": "approve"},
+    {"key": "test_convention", "type": "project_convention", "title": "Unit tests sit next to sources", "claim": "Unit tests sit next to their sources as .test.ts files; session.test.ts calls isSessionExpired.", "evidence": [{"edge": {"source": ["src/auth/session.test.ts", "expiresAfterTimeout"], "target": ["src/auth/session.ts", "isSessionExpired"]}}], "context": [{"fact": ["src/auth/session.test.ts", "expiresAfterTimeout"]}], "outcome": "approve"},
+    {"key": "absolute", "type": "architecture_decision", "title": "Absolute session timeout", "claim": "Sessions expire a fixed time after login regardless of activity.", "evidence": [{"id": "ADR-0002"}], "outcome": "reject"},
+    {"key": "login", "type": "requirement", "title": "Login validates credentials", "claim": "Login validates the user name and password before a session is created.", "evidence": [{"id": "REQ-AUTH-003"}], "outcome": "pending"},
+    {"key": "no_server", "type": "project_constraint", "title": "No external session server", "claim": "Session storage must not depend on an external database server.", "evidence": [{"id": "ADR-0001"}], "outcome": "approve"},
+    {"key": "one_file", "type": "project_constraint", "title": "One session database per instance", "claim": "Each deployment instance ships exactly one embedded SQLite session database file.", "evidence": [{"id": "ADR-0001"}], "outcome": "approve"},
+    {"key": "expiry_deprecated", "type": "requirement", "title": "Session expiration is deprecated", "claim": "Session expiration is no longer a product requirement.", "evidence": [{"id": "REQ-AUTH-001"}], "asserts": "REQ-AUTH-001=deprecated", "outcome": "approve"}
+  ],
+  "refused": [
+    {"name": "ambiguous duplicate requirement", "evidence": [{"id": "REQ-DUP-001"}], "code": "ambiguous_evidence"},
+    {"name": "unknown identifier", "evidence": [{"id": "REQ-NOPE-404"}], "code": "evidence_not_found"},
+    {"name": "code location cannot back", "evidence": [{"fact": ["src/auth/session.ts", "isSessionExpired"]}], "code": "evidence_cannot_back"},
+    {"name": "unresolved claim cannot back", "evidence": [{"relationship": {"author": "REQ-AUDIT-001", "kind": "DECLARED_IMPLEMENTATION"}}], "code": "evidence_cannot_back"},
+    {"name": "path traversal", "evidence": [{"source": "../outside.md"}], "code": "invalid_path"},
+    {"name": "duplicate claim", "type": "architecture_decision", "claim": "session records are stored in an embedded sqlite database file -- no external database server is required", "evidence": [{"id": "ADR-0001"}], "code": "duplicate_memory"}
+  ],
+  "supersede": [{"old": "no_server", "new": "one_file", "reason": "narrower constraint"}],
+  "searches": [
+    {"query": "SQLite", "relevant": ["sqlite", "one_file"], "excluded": ["no_server", "absolute"]},
+    {"query": "inactivity", "relevant": ["inactivity"], "excluded": ["absolute"]},
+    {"query": "token refresh", "relevant": ["refresh"], "excluded": []},
+    {"query": "isSessionExpired", "relevant": ["middleware", "test_convention"], "excluded": []},
+    {"query": "absolute timeout", "relevant": [], "excluded": ["absolute"]},
+    {"query": "login validates", "relevant": [], "excluded": ["login"]},
+    {"query": "REQ-AUTH-001", "relevant": ["expiry", "expiry_deprecated"], "excluded": []},
+    {"query": "external database server", "relevant": ["sqlite"], "excluded": ["no_server"]}
+  ],
+  "investigations": [
+    {"task": "Why does this project use SQLite?", "relevant": ["sqlite", "one_file"]},
+    {"task": "Modify session expiration", "relevant": ["expiry", "inactivity", "middleware", "expiry_deprecated", "test_convention"]},
+    {"task": "Investigate token refresh failures", "relevant": ["refresh"]},
+    {"task": "What implements REQ-AUTH-001?", "relevant": ["expiry", "expiry_deprecated"]},
+    {"task": "Fix legacy cleanup errors", "relevant": []}
+  ],
+  "mutations": [
+    {"name": "architecture edited, not re-indexed", "edits": [{"path": "docs/ARCHITECTURE.md", "replace": ["No external database server is required.", "A managed database server is required."]}], "reindex": false,
+     "expect": {"sqlite": "stale", "inactivity": "current", "expiry": "current", "refresh": "current", "middleware": "current", "test_convention": "current", "one_file": "current", "expiry_deprecated": "current"}},
+    {"name": "architecture edit re-indexed", "edits": [], "reindex": true, "expect": {"sqlite": "stale", "one_file": "current"}},
+    {"name": "middleware shifted down two lines", "edits": [{"path": "src/api/middleware.ts", "prepend": "// moved\n// down\n"}], "reindex": true, "expect": {"middleware": "current", "test_convention": "current"}},
+    {"name": "REQ-AUTH-002 section deleted", "edits": [{"path": "docs/PRD.md", "delete_between": ["## REQ-AUTH-002", "## REQ-AUTH-003"]}], "reindex": true, "expect": {"refresh": "missing", "expiry": "current", "expiry_deprecated": "current"}},
+    {"name": "ADR-0001 superseded by ADR-0004", "edits": [{"path": "docs/adr/ADR-0001-sqlite.md", "replace": ["status: accepted", "status: superseded"]}, {"path": "docs/adr/ADR-0004-postgres.md", "write": "---\nid: ADR-0004\nstatus: accepted\nsupersedes: ADR-0001\n---\n# Store sessions in Postgres\n"}], "reindex": true,
+     "expect": {"sqlite": "stale", "one_file": "stale", "no_server": "stale", "inactivity": "current", "expiry": "current", "middleware": "current", "test_convention": "current", "refresh": "missing", "expiry_deprecated": "current"}}
+  ],
+  "conflicts": [
+    {"kind": "conflicting_assertions", "memories": ["expiry", "expiry_deprecated"]},
+    {"kind": "superseded_decision_reference", "memories": ["sqlite"]},
+    {"kind": "superseded_decision_reference", "memories": ["one_file"]},
+    {"kind": "evidence_changed", "memories": ["sqlite"]},
+    {"kind": "evidence_changed", "memories": ["one_file"]},
+    {"kind": "evidence_missing", "memories": ["refresh"]}
+  ],
+  "history": {
+    "sqlite": ["proposed", "approved"],
+    "absolute": ["proposed", "rejected"],
+    "login": ["proposed"],
+    "no_server": ["proposed", "approved", "superseded"],
+    "one_file": ["proposed", "approved", "supersedes"]
+  }
+}

@@ -6,6 +6,7 @@ Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md) (prebuilt binaries,
 
 ## Using Repogi
 
+- [Project memory](PROJECT_MEMORY.md): developer-reviewed claims with immutable evidence snapshots, live verification, history and opt-in agent access (unreleased development milestone).
 - [Agent investigation](AGENT_INVESTIGATION.md): evidence-backed investigation plans for a task, with uncertainty, freshness and work limits (unreleased development milestone).
 - [Knowledge relationships](KNOWLEDGE_RELATIONSHIPS.md): explicit requirements, ADRs, bounded trace queries and source-backed links (unreleased development milestone).
 - [Project knowledge](KNOWLEDGE.md): Markdown indexing, query-centered excerpts, balanced code/docs context, extractor upgrades and evidence limits.

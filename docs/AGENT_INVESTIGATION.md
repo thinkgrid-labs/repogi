@@ -1,6 +1,6 @@
 # Agent investigation
 
-Agent Investigation is an internal development milestone (v0.4), not a published release. The workspace version remains 0.1.0. Public release preparation is deferred until the persistent-memory milestone has been validated and publication is explicitly approved.
+Agent Investigation is an internal development milestone (v0.4; restructured without output changes in v0.4.1; opt-in project memory in v0.5), not a published release. The workspace version remains 0.1.0. Public release preparation is deferred until the persistent-memory milestone has been validated and publication is explicitly approved.
 
 `repogi investigate` turns a development task into an ordered, evidence-backed **investigation plan**: where to start reading, which requirements and decisions govern the behavior, which static consumers and test candidates to look at, and what is unresolved, stale or missing. Every step cites indexed repository evidence and names a bounded next read or query.
 
@@ -24,6 +24,7 @@ repogi investigate "Investigate token refresh failures" --depth 3 --max-bytes 20
 | `--max-steps` | 8 | 1–16 | Steps returned after selection. |
 | `--depth` | 2 | 1–3 | Upstream static-consumer hops from each code target. |
 | `--selector` | none | up to 8 | Exact knowledge entity ID, author ID (`REQ-…`, `ADR-…`) or code fact ID. Repeatable. |
+| `--include-memory` | off | flag | Add approved [project memories](PROJECT_MEMORY.md) as `approved_project_memory` evidence. Off: output is unchanged from v0.4. |
 
 `REQ-…` and `ADR-…` tokens written in the task itself (uppercase, as indexed) are also treated as selectors. Names are never resolved by similarity: a selector that matches nothing is reported as `selector_not_found`, and one that matches several entities is reported as `ambiguous_selector` with every match shown.
 
@@ -43,7 +44,7 @@ Affected-test discovery (`impact --tests`) compares two Git states and maintains
 
 ### Plan phases
 
-Default order: selected entities → implementation → requirements and decisions → consumers → dependencies → test candidates → uncertainty → additional lexical candidates. Keyword cues promote a whole phase: knowledge words (`why`, `decision`, `requirement`, `ADR`, …) or an author-ID selector move requirements and decisions right after the selected entities; impact words (`depends`, `callers`, `affected`, …) move consumers after implementation; test words move test candidates after implementation.
+Default order: selected entities → implementation → requirements and decisions → (opt-in) approved memories → consumers → dependencies → test candidates → uncertainty → additional lexical candidates. Keyword cues promote a whole phase: knowledge words (`why`, `decision`, `requirement`, `ADR`, …) or an author-ID selector move requirements and decisions right after the selected entities; impact words (`depends`, `callers`, `affected`, …) move consumers after implementation; test words move test candidates after implementation.
 
 ## Evidence classes
 
@@ -59,6 +60,7 @@ Evidence classes are reported separately and are never folded into one confidenc
 | `lexical_candidate` | FTS5 name/text discovery. | Any relationship. |
 | `unresolved_reference` | Unresolved, ambiguous, invalid or unsupported claims, and same-name sites with no resolved target. | A link. |
 | `stale_reference` | A claim whose indexed target was deleted or changed. | A current target. |
+| `approved_project_memory` | A developer-approved memory and one of its backing citations, with live verification (only with `--include-memory`). | Runtime proof, or precedence over current code; stale memories are flagged and selected last. |
 
 ## Response structure
 
@@ -72,13 +74,13 @@ The JSON response (`schema_version` 1, `kind: "investigation"`) contains:
 - `uncertainty[]`: request-level findings such as `selector_not_found`, `unsupported_task` or `no_matching_evidence`.
 - `freshness`, `budget` and `completeness` (below).
 
-Step actions: `inspect_implementation`, `review_requirement`, `review_decision`, `review_document`, `inspect_consumers`, `inspect_dependencies`, `review_test_candidates`, `resolve_uncertainty`, `review_lexical_candidates`.
+Step actions: `inspect_implementation`, `review_requirement`, `review_decision`, `review_document`, `inspect_consumers`, `inspect_dependencies`, `review_test_candidates`, `resolve_uncertainty`, `review_lexical_candidates`, and with `--include-memory` `review_memory` (category `memory`, target role `memory`, `next` `atlas_memory {operation, id}`, `budget.max_memories`).
 
 `next` entries are built only from indexed identities and locations: `read` (repository-relative path and line range), `atlas_references {id}`, `atlas_dependencies {id, direction, depth}` and `atlas_knowledge_trace {selector, depth}`. The CLI equivalents are reading the file, `repogi knowledge trace`, and the MCP navigation tools. Objectives are fixed templates filled with identifiers and kinds. Document text is never copied into a step, and nothing in a document can add a step, a tool or an argument.
 
 ### Uncertainty codes
 
-`behavior_unverified`, `lexical_only`, `historical_decision`, `superseded_decision`, `unresolved_reference`, `ambiguous_reference`, `invalid_reference`, `unsupported_reference`, `stale_reference`, `unconfirmed_sites`, `static_scope_only`, `tests_not_executed`, `stale_source`, `unverified_source`, and request-level `selector_not_found`, `ambiguous_selector`, `task_terms_truncated`, `unsupported_task`, `no_matching_evidence`.
+`behavior_unverified`, `lexical_only`, `historical_decision`, `memory_review_only`, `stale_memory`, `unverified_memory` (memory steps only), `superseded_decision`, `unresolved_reference`, `ambiguous_reference`, `invalid_reference`, `unsupported_reference`, `stale_reference`, `unconfirmed_sites`, `static_scope_only`, `tests_not_executed`, `stale_source`, `unverified_source`, and request-level `selector_not_found`, `ambiguous_selector`, `task_terms_truncated`, `unsupported_task`, `no_matching_evidence`.
 
 ## Example (fixture output)
 
@@ -132,7 +134,7 @@ repogi mcp --root /abs/path/to/project --tools atlas_context,atlas_references,at
 {"task":"Modify session expiration","selectors":["REQ-AUTH-001"],"max_bytes":12000,"max_steps":8,"depth":2,"format":"json"}
 ```
 
-`task` is required (at most 8192 bytes). `max_bytes` defaults to 12000 and accepts 256–32000. `format` is `agent` (the text projection) or `json`. `root` follows the usual rules: optional with one configured root, required with several, and it must be an absolute configured root. Unknown arguments are rejected. The tool opens the index read-only and never indexes. It registers for cancellation like the other tools. The definition carries `readOnlyHint: true`.
+`task` is required (at most 8192 bytes). `max_bytes` defaults to 12000 and accepts 256–32000. `format` is `agent` (the text projection) or `json`. `root` follows the usual rules: optional with one configured root, required with several, and it must be an absolute configured root. Unknown arguments are rejected. When `atlas_memory` is also enabled, the schema gains `include_memory` (boolean); otherwise the definition is byte-identical to v0.4 and `include_memory` is refused. The tool opens the index read-only and never indexes. It registers for cancellation like the other tools. The definition carries `readOnlyHint: true`.
 
 ## Limits and work bounds
 
@@ -194,4 +196,5 @@ These are small hand-labeled fixtures, labelled by the developers. They show tha
 - Consumers are static and TypeScript-only. Runtime dispatch, dependency injection, HTTP and other languages are outside the graph.
 - Selected-file checks are point-in-time, cover at most 32 files and do not certify the rest of the repository.
 - Titles and identifiers in `targets[].name` and `rule` fields are repository data. They are escaped and capped at 160 bytes, but they remain untrusted text.
-- Plans are not stored. An investigation is not a reviewed project memory.
+- Plans are not stored. An investigation is not a reviewed project memory and never creates one.
+- Memory recall (opt-in) is capped at 4 memories and matched by plan identities plus lexical task terms; see [project memory](PROJECT_MEMORY.md#investigation-integration).
