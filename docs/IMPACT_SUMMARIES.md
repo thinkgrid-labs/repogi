@@ -82,8 +82,8 @@ These fields deliberately describe different axes:
 
 Duplicate removal alone never proves completeness. All rows may fit while
 coverage remains unknown when a repository contains syntax-error or skipped
-sources. The unsupported profile is printed in every summary: JavaScript and
-other unsupported extensions, packages/excluded directories, and dynamic runtime
+sources. The unsupported profile is printed in every summary: CommonJS bindings,
+dynamic imports, unsupported extensions, packages/excluded directories, and dynamic runtime
 behavior. Enumeration of confirmed dependencies does not establish runtime
 safety, exhaustive effects, or TypeScript compilation breakage. Compilation
 claims require compiler evidence, which this engine does not produce.

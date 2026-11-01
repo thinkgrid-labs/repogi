@@ -1,6 +1,7 @@
 //! A bounded native static binder over persisted AST facts. No source is executed.
 use code_intel_core::{
     file_id,
+    language::Language,
     semantic::{
         Binding, Evidence, Location, Module, PathMapping, Project, Relationship, Resolution,
         ResolutionContext, SemanticEdge, Symbol,
@@ -137,7 +138,7 @@ impl Resolver<'_> {
                     vec![format!("{path}: module {name} leaves the repository root")],
                 ));
             };
-            match self.find(&base) {
+            match self.find(path, &base) {
                 Found::File(target) => (target, Vec::new()),
                 other => return Err(Self::failed(path, name, other, Vec::new(), false)),
             }
@@ -203,7 +204,7 @@ impl Resolver<'_> {
                         steps,
                     ));
                 };
-                match self.find(&base) {
+                match self.find(path, &base) {
                     Found::File(target) => {
                         steps.push(format!(
                             "{}: paths {} -> ./{template} => {target}",
@@ -261,7 +262,7 @@ impl Resolver<'_> {
                 std::mem::take(steps),
             )));
         };
-        match self.find(&base) {
+        match self.find(path, &base) {
             Found::File(target) => {
                 steps.push(format!(
                     "{}: baseUrl {} => {target}",
@@ -334,11 +335,20 @@ impl Resolver<'_> {
             directory = directory.rsplit_once('/').map_or("", |(dir, _)| dir);
         }
     }
+    /// The module a specifier's base path names, by the importer's language.
+    fn find(&self, importer: &str, base: &str) -> Found {
+        if Language::of(importer).is_some_and(Language::is_javascript) {
+            self.find_javascript(base)
+        } else {
+            self.find_typescript(base)
+        }
+    }
     /// TypeScript's candidate order for a base path. The first existing file
-    /// wins; a first hit that Atlas does not index (JavaScript, `.mts`, a
-    /// package.json redirect) is unsupported rather than skipped. Several indexed
-    /// `.ts`/`.tsx`/`index` forms stay unchosen, as in the relative profile.
-    fn find(&self, base: &str) -> Found {
+    /// wins; a first hit that Repogi does not index (a declaration-only
+    /// `.d.mts`, a package.json redirect) is unsupported rather than skipped.
+    /// Several indexed `.ts`/`.tsx`/`index` forms stay unchosen, as in the
+    /// relative profile.
+    fn find_typescript(&self, base: &str) -> Found {
         let extension = Path::new(base).extension().and_then(|value| value.to_str());
         let (ordered, forms): (Vec<String>, Vec<String>) =
             if matches!(extension, Some("ts" | "tsx")) {
@@ -420,6 +430,79 @@ impl Resolver<'_> {
         } else {
             Found::File(first.clone())
         }
+    }
+    /// JavaScript lookup. Runtimes and bundlers agree on little beyond this:
+    /// a specifier with an extension names exactly that file (or, when it is
+    /// absent, the TypeScript source of that output name), and an
+    /// extensionless one tries files before directories. Where tools differ
+    /// (`a.js` beside `a.ts` or `a.mjs`, several `index` files) the result is
+    /// ambiguous instead of one tool's choice. `package.json` (`main`,
+    /// `exports`) and unindexed files are unsupported; JSON modules are not
+    /// tracked, so they stay unresolved.
+    fn find_javascript(&self, base: &str) -> Found {
+        const FILES: [&str; 8] = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+        const INDEXES: [&str; 6] = ["js", "jsx", "mjs", "cjs", "ts", "tsx"];
+        let name = base.rsplit('/').next().unwrap_or(base);
+        let explicit = name
+            .rsplit_once('.')
+            .is_some_and(|(stem, ext)| !stem.is_empty() && (FILES.contains(&ext) || ext == "json"));
+        let groups: Vec<Vec<String>> = if explicit {
+            // The named file wins. Without it, the module can only be the
+            // TypeScript source compiled to that name (`./a.js` from `a.ts`),
+            // which is how TypeScript-built projects import from JavaScript.
+            let sources: &[&str] = match name.rsplit_once('.').map(|(_, ext)| ext) {
+                Some("js" | "jsx") => &["ts", "tsx"],
+                Some("mjs") => &["mts"],
+                Some("cjs") => &["cts"],
+                _ => &[],
+            };
+            let stem = base.rsplit_once('.').map_or(base, |(stem, _)| stem);
+            vec![
+                vec![base.to_owned()],
+                sources.iter().map(|ext| format!("{stem}.{ext}")).collect(),
+            ]
+        } else {
+            vec![
+                FILES.iter().map(|ext| format!("{base}.{ext}")).collect(),
+                std::iter::once(format!("{base}/package.json"))
+                    .chain(INDEXES.iter().map(|ext| format!("{base}/index.{ext}")))
+                    .collect(),
+            ]
+        };
+        for group in groups {
+            if group.iter().any(|candidate| {
+                candidate
+                    .rsplit_once('/')
+                    .map_or("", |(dir, _)| dir)
+                    .split('/')
+                    .any(|part| EXCLUDED_DIRECTORIES.contains(&part))
+            }) {
+                return Found::Excluded;
+            }
+            let present: Vec<&String> = group
+                .iter()
+                .filter(|candidate| {
+                    self.modules.contains_key(*candidate)
+                        || self.resolution.other_files.contains(*candidate)
+                })
+                .collect();
+            match present.as_slice() {
+                [] => {}
+                [one] if self.modules.contains_key(*one) => return Found::File((*one).clone()),
+                [one] => return Found::Unindexed((*one).clone()),
+                several => {
+                    // A package.json or an unindexed sibling may redirect or win.
+                    return match several
+                        .iter()
+                        .find(|candidate| !self.modules.contains_key(**candidate))
+                    {
+                        Some(unindexed) => Found::Unindexed((*unindexed).clone()),
+                        None => Found::Conflict(several.iter().map(|c| (*c).clone()).collect()),
+                    };
+                }
+            }
+        }
+        Found::Missing
     }
     /// Export lookup. A lookup that starts outside any cycle (empty `seen`)
     /// depends only on the modules, so it is computed once per rebind; lookups

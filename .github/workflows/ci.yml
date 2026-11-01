@@ -52,6 +52,15 @@ jobs:
       - name: Build CLI
         run: cargo build --release --locked -p code-intel-cli
 
+      # Offline: graders are validated against reference solutions and the
+      # live adapter runs against a fake agent executable. No model is called.
+      - name: Agent outcome harness tests
+        env:
+          REPOGI_BINARY: target/release/repogi
+        run: |
+          python3 scripts/evaluation/agent_outcomes/run.py validate
+          python3 scripts/evaluation/agent_outcomes/tests/test_harness.py -v
+
   # The release workflow tests every published target natively, but only for
   # tags. This catches macOS-only failures (filesystem, locking, durability)
   # before a change is merged.

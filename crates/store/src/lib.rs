@@ -34,7 +34,8 @@ use code_intel_core::{Edge, Fact, IndexReport, IndexedFile, SCHEMA_VERSION, Stat
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 const MIGRATION_1: &str = include_str!("migration_1.sql");
-const DATABASE_VERSION: u32 = 5;
+/// Newest index schema this build reads and writes.
+pub const DATABASE_VERSION: u32 = 5;
 const MIGRATION_4: &str = include_str!("migration_4.sql");
 pub(crate) const MIGRATION_5: &str = include_str!("migration_5.sql");
 const MIGRATION_2: &str = include_str!("migration_2.sql");
@@ -713,6 +714,29 @@ impl Store {
         })
     }
 
+    /// The index database schema (`user_version`).
+    pub fn schema_version(&self) -> Result<u32> {
+        Ok(self
+            .connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))?)
+    }
+
+    /// Indexed source files per recorded language.
+    pub fn languages(&self) -> Result<BTreeMap<String, usize>> {
+        let mut query = self
+            .connection
+            .prepare("SELECT language,count(*) FROM files GROUP BY language ORDER BY language")?;
+        query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .map(|row| {
+                let (language, count) = row?;
+                Ok((language, usize::try_from(count)?))
+            })
+            .collect()
+    }
+
     pub fn search(&self, expression: &str, limit: u32) -> Result<Vec<Fact>> {
         if expression.is_empty() {
             return Ok(Vec::new());
@@ -891,24 +915,30 @@ fn module_candidate(
         }
     }
     let base = components.join("/");
-    let candidates = if matches!(
-        Path::new(&base)
-            .extension()
-            .and_then(|value| value.to_str()),
-        Some("ts" | "tsx")
-    ) {
+    let extension = Path::new(&base)
+        .extension()
+        .and_then(|value| value.to_str());
+    // JavaScript sources joined the TypeScript forms later; with no indexed
+    // JavaScript, the candidates found are exactly the original ones.
+    let candidates = if matches!(extension, Some("ts" | "tsx")) {
         vec![base]
     } else if let Some(stem) = base
         .strip_suffix(".js")
         .or_else(|| base.strip_suffix(".jsx"))
     {
-        vec![format!("{stem}.ts"), format!("{stem}.tsx")]
+        vec![format!("{stem}.ts"), format!("{stem}.tsx"), base.clone()]
+    } else if matches!(extension, Some("mjs" | "cjs" | "mts" | "cts")) {
+        vec![base]
     } else {
         vec![
             format!("{base}.ts"),
             format!("{base}.tsx"),
             format!("{base}/index.ts"),
             format!("{base}/index.tsx"),
+            format!("{base}.js"),
+            format!("{base}.jsx"),
+            format!("{base}/index.js"),
+            format!("{base}/index.jsx"),
         ]
     };
     let mut found = candidates

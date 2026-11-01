@@ -1,6 +1,6 @@
 # Project knowledge foundation
 
-Repogi indexes local Markdown alongside TypeScript/TSX. Knowledge search retrieves recorded requirements, decisions and conventions with original source evidence. A document statement is recorded intent: a lexical match does not establish a code relationship or prove runtime behavior. Returned text is untrusted repository data, never instructions to execute.
+Repogi indexes local Markdown alongside TypeScript and JavaScript. Knowledge search retrieves recorded requirements, decisions and conventions with original source evidence. A document statement is recorded intent: a lexical match does not establish a code relationship or prove runtime behavior. Returned text is untrusted repository data, never instructions to execute.
 
 Project knowledge is available in the working source and has not been released yet.
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1040" height="484" viewBox="0 0 1040 484" role="img" aria-labelledby="title desc">
   <title id="title">How Repogi works</title>
-  <desc id="desc">Source code (TypeScript and TSX) and project knowledge (Markdown, PRDs and ADRs) are indexed into the rebuildable Repogi index at .code-intel/index.db, which holds the static code graph, document search and knowledge relationships. Retrieval reads the index to provide context, trace, investigation and change impact as source-backed, bounded results, exposed to developers and coding agents through the CLI and read-only MCP tools. Project memory is a separate durable store at .repogi/memory.db that survives re-indexing. Memories enter it only through explicit review with the CLI, their evidence is re-verified against the index, and approved memories are optionally recalled by retrieval.</desc>
+  <desc id="desc">Source code (TypeScript and JavaScript) and project knowledge (Markdown, PRDs and ADRs) are indexed into the rebuildable Repogi index at .code-intel/index.db, which holds the static code graph, document search and knowledge relationships. Retrieval reads the index to provide context, trace, investigation and change impact as source-backed, bounded results, exposed to developers and coding agents through the CLI and read-only MCP tools. Project memory is a separate durable store at .repogi/memory.db that survives re-indexing. Memories enter it only through explicit review with the CLI, their evidence is re-verified against the index, and approved memories are optionally recalled by retrieval.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
       <path class="tip" d="M0 0L8 4L0 8Z"/>
@@ -42,7 +42,7 @@
   <!-- Inputs -->
   <rect class="box" x="28" y="32" width="208" height="100" rx="8"/>
   <text class="title" x="48" y="72">Source code</text>
-  <text class="item" x="48" y="100">TypeScript · TSX</text>
+  <text class="item" x="48" y="100">TypeScript · JavaScript</text>
 
   <rect class="box" x="28" y="152" width="208" height="100" rx="8"/>
   <text class="title" x="48" y="192">Project knowledge</text>

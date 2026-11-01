@@ -381,14 +381,22 @@ fn unindexed_modules_that_typescript_would_pick_first_block_resolution() {
             "tsconfig.json",
             r#"{ "compilerOptions": { "allowJs": true, "paths": { "@/*": ["./src/*"] } } }"#,
         ),
-        ("src/thing.js", "export function helper() {}\n"),
+        ("src/thing/package.json", "{\"main\": \"lib.js\"}\n"),
         ("src/thing/index.ts", UTIL),
         ("src/use.ts", "import { helper } from '@/thing';\n"),
+        // JavaScript is indexed, so TypeScript's earlier `.js` pick now resolves.
+        ("src/other.js", "export function helper() {}\n"),
+        ("src/other/index.ts", UTIL),
+        ("src/use-other.ts", "import { helper } from '@/other';\n"),
     ]);
     index(root.path());
-    let edge = import(&graph(root.path()), "src/use.ts", "helper").clone();
+    let edges = graph(root.path());
+    let edge = import(&edges, "src/use.ts", "helper").clone();
     assert_eq!(edge["status"], "unsupported", "{edge}");
     assert_eq!(rule(&edge), "module_resolves_to_unindexed_file");
+    let edge = import(&edges, "src/use-other.ts", "helper");
+    assert_eq!(edge["status"], "resolved", "{edge}");
+    assert_eq!(edge["target_id"], "function:src/other.js:7:27");
 }
 
 #[test]

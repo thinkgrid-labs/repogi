@@ -695,7 +695,7 @@ fn coverage(before: &Catalog<'_>, after: &Catalog<'_>) -> Coverage {
         base: side_coverage(before),
         head: side_coverage(after),
         not_analysed: vec![
-            "JavaScript sources (.js/.jsx/.mjs/.cjs) and .mts/.cts files".into(),
+            "CommonJS bindings (require, module.exports, exports.name) and dynamic import()".into(),
             "packages and node_modules; excluded directories (dist, build, coverage, .next, generated)".into(),
             "runtime behaviour: dynamic imports, instance dispatch, values passed through props or registries".into(),
         ],
@@ -2284,7 +2284,7 @@ fn render_impact(out: &mut String, impact: &SymbolImpact, detail: bool) {
     if impact.direct.is_empty() && omitted("direct") == 0 && impact.change != "added" {
         let _ = writeln!(
             out,
-            "  no confirmed consumers in the analysed graph (not proof of safety: JavaScript, packages and dynamic uses are not analysed)"
+            "  no confirmed consumers in the analysed graph (not proof of safety: CommonJS, packages and dynamic uses are not analysed)"
         );
     }
     if omitted("direct") > 0 {
@@ -2404,7 +2404,7 @@ fn render_footer(out: &mut String, report: &ImpactReport) {
     }
     let _ = writeln!(
         out,
-        "\nscope: static TypeScript/TSX graph; a dependency is not a break; JavaScript, packages and runtime behaviour are not analysed"
+        "\nscope: static TypeScript/JavaScript graph; a dependency is not a break; packages and runtime behaviour are not analysed"
     );
 }
 

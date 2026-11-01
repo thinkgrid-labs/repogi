@@ -142,7 +142,7 @@ pub fn investigate_with_memory(
     if task.classification == "unsupported" {
         work.ledger.global("unsupported_task", "no searchable content words or explicit selectors; name identifiers, REQ-/ADR- IDs or pass --selector".into(), vec![]);
     } else if drafts.is_empty() {
-        work.ledger.global("no_matching_evidence", "no indexed code, requirement or decision matched; prose can miss differently named code, and only .ts/.tsx and Markdown are indexed".into(), vec![]);
+        work.ledger.global("no_matching_evidence", format!("no indexed code, requirement or decision matched; prose can miss differently named code, and only {} and Markdown are indexed", code_intel_core::language::SOURCE_EXTENSIONS_TEXT), vec![]);
     }
     work.finish(task, cues, drafts, request, format)
 }

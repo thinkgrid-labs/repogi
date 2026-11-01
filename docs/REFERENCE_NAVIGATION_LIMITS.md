@@ -1,6 +1,6 @@
 # Navigation scope and limits
 
-Repogi provides static TypeScript/TSX navigation with explicit uncertainty.
+Repogi provides static TypeScript and JavaScript navigation with explicit uncertainty.
 
 ## Distinguish output caps from graph work caps
 
@@ -49,8 +49,8 @@ and unchecked paths retain that uncertainty. Full `atlas_status` checks the
 whole index; explicit indexing is required to update it. Added/removed source
 and settings can alter relationships even when one returned file matches.
 
-Only eligible `.ts` and `.tsx` files are indexed. JavaScript/JSX, `.mts`/`.cts`,
-other languages, dynamic/runtime-only relationships, package/instance-dispatch
+Only eligible `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` and `.cjs` files
+are indexed (the JavaScript extensions, `.mts` and `.cts` in source builds). Other languages, CommonJS bindings, dynamic/runtime-only relationships, package/instance-dispatch
 gaps, generated/excluded files and grammar errors need native Read/Grep/Glob.
 Unresolved and ambiguous sites never become confirmed targets by name
 similarity. JSX tags count as REFERENCES, not function CALLS. References to tests

@@ -6,18 +6,18 @@ No dates. Order within each table is the intended order of work. Status: **In pr
 
 | Item | Status | Done when |
 | --- | --- | --- |
-| 0.1.1 release | In progress | Release dry run passes on all targets; publishing requires approval |
+| 0.1.2 release | In progress | JavaScript, `init`, `doctor` and agent setup pass release checks on all targets; publishing requires approval |
 | Install and onboarding | Planned | Scripted README quick start passes on every published target |
-| Agent-task evaluation | Planned | Same agent with and without Repogi; third parties can reproduce published results |
+| Agent-task evaluation | In progress | Harness, tasks and graders are in source; done when live paired runs are published and third parties can reproduce them |
 | Windows | Exploring | Full test suite passes natively on Windows |
 
 ## P1 — Developer experience
 
 | Item | Status | Done when |
 | --- | --- | --- |
-| `repogi doctor` | Exploring | Read-only check of index, memory, freshness and agent setup, with fixes |
-| `repogi init` | Exploring | First index and `.gitignore` suggestions, never overwrites files |
-| Agent setup | Exploring | Project-scoped MCP config for Claude Code, Codex and other clients |
+| `repogi doctor` | In progress | Read-only check of index, memory, freshness and agent setup, with fixes (in source; ships in 0.1.2) |
+| `repogi init` | In progress | First index and Git ignore rules, never overwrites files (in source; ships in 0.1.2) |
+| Agent setup | In progress | Project-scoped MCP config for Claude Code and Codex in source (`repogi agent add`); other clients later |
 | Optional `repogi.yaml` | Exploring | Include/exclude and defaults; cannot widen access beyond the repo |
 | Opt-in `repogi watch` | Exploring | Foreground incremental re-indexing; explicit indexing stays default |
 
@@ -27,8 +27,8 @@ Each language needs syntax extraction, module resolution, reference semantics an
 
 | Item | Status | Done when |
 | --- | --- | --- |
-| Shared analyzer architecture | Exploring | New languages added without changing TypeScript output |
-| JavaScript, JSX, MJS, CJS, MTS, CTS | Planned | Resolved references and impact, zero wrong confirmed edges on labeled repos |
+| Shared analyzer architecture | In progress | New languages added without changing TypeScript results (JavaScript changed only coverage wording; Python next) |
+| JavaScript, JSX, MJS, CJS, MTS, CTS | In progress | In source: resolved references and impact, zero wrong confirmed edges on the labeled fixture. Next: CommonJS bindings, instance dispatch, more labeled repositories |
 | Python | Exploring | Imports, then resolved direct calls; dynamic code stays unconfirmed |
 | Rust | Exploring | Cargo workspaces, then resolved references for macro-free code |
 | Go | Exploring | Packages, modules and resolved references |

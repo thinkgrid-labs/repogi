@@ -73,10 +73,25 @@ fn language_and_exclusion_scope_are_explicit() {
         ("legacy.jsx", "export const View=()=> <div/>;"),
         ("legacy.mts", "export const legacy=1;"),
         ("legacy.cts", "export const legacy=1;"),
+        ("legacy.py", "raise SystemExit('must never run')"),
+        ("upper.JS", "throw new Error('must never run');"),
+        ("legacy.json", "{}"),
     ];
     let (_temp, root) = sources(&files);
     let mut server = Server::ready(&[&root]);
-    for path in ["legacy.js", "legacy.jsx", "legacy.mts", "legacy.cts"] {
+    // JavaScript and the TypeScript module variants are indexed (never run).
+    for (name, path) in [
+        ("View", "legacy.jsx"),
+        ("legacy", "legacy.mts"),
+        ("legacy", "legacy.cts"),
+    ] {
+        assert_eq!(
+            server.json("atlas_symbol", json!({"name":name,"path":path}))["items"][0]["path"],
+            path
+        );
+    }
+    // Extensions match exactly; other languages stay outside coverage.
+    for path in ["legacy.py", "upper.JS", "legacy.json"] {
         for tool in ["atlas_symbol", "atlas_references", "atlas_dependencies"] {
             let (text, error) = server.call(tool, json!({"name":"legacy","path":path}));
             assert!(
@@ -104,7 +119,10 @@ fn language_and_exclusion_scope_are_explicit() {
         "view.tsx"
     );
     let empty = server.ok("atlas_context", json!({"task":"missingLegacyIdentifier"}));
-    assert!(empty.contains("no indexed matches") && empty.contains(".ts/.tsx only"));
+    assert!(
+        empty.contains("no indexed matches")
+            && empty.contains("scope .ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs")
+    );
     assert_eq!(
         server.error_code("atlas_symbol", json!({"name":"x","path":"../legacy.js"})),
         "invalid_path"

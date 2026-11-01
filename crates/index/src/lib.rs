@@ -17,7 +17,7 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use code_intel_core::{
-    Diagnostic, Freshness, IndexReport, MAX_FILE_BYTES, SCHEMA_VERSION,
+    Diagnostic, Freshness, IndexReport, MAX_FILE_BYTES, SCHEMA_VERSION, language::Language,
     semantic::SEMANTIC_IR_VERSION,
 };
 use code_intel_store::{Store, validate_state_path};
@@ -248,10 +248,10 @@ pub fn content_hash(text: &str) -> String {
 /// The exact extension rule shared by indexing and navigation coverage.
 #[must_use]
 pub fn supported_source(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|value| value.to_str()),
-        Some("ts" | "tsx")
-    )
+    path.extension()
+        .and_then(|value| value.to_str())
+        .and_then(Language::from_extension)
+        .is_some()
 }
 
 #[must_use]
@@ -534,6 +534,7 @@ fn read_source(
     if name.ends_with(".min.ts")
         || name.ends_with(".generated.ts")
         || name.ends_with(".generated.tsx")
+        || generated_name(name)
         || source
             .lines()
             .take(5)
@@ -543,4 +544,17 @@ fn read_source(
         return Ok(None);
     }
     Ok(Some(source))
+}
+
+/// Minified and generated names for the extensions added after TypeScript
+/// (`app.min.js`, `schema.generated.mts`). The original `.ts`/`.tsx` rules above
+/// stay exactly as they were. Names are matched exactly, like extensions.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+fn generated_name(name: &str) -> bool {
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    !matches!(extension, "ts" | "tsx")
+        && Language::from_extension(extension).is_some()
+        && (stem.ends_with(".min") || stem.ends_with(".generated"))
 }

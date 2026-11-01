@@ -2,11 +2,11 @@
 
 This directory contains public usage, API and behavior documentation. Keep internal plans, design proposals, evaluation notes and maintainer procedures under `internal/`, outside public source exports.
 
-Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md) (prebuilt binaries, checksums and source builds; [release assets](RELEASES.md)), then configure a client through [MCP](MCP.md). Repogi indexes TypeScript/TSX and Markdown project documents; see [supported languages](SUPPORTED_LANGUAGES.md).
+Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md) (prebuilt binaries, checksums and source builds; [release assets](RELEASES.md)), then set up a project with [developer experience](DEVELOPER_EXPERIENCE.md) (`init`, `doctor`, `agent add`) and configure a client through [MCP](MCP.md). Repogi indexes TypeScript, JavaScript and Markdown project documents; see [supported languages](SUPPORTED_LANGUAGES.md).
 
 ## Releases
 
-The latest published release is **0.1.0**, with prebuilt Linux and macOS binaries for TypeScript/TSX code intelligence: context, references, dependencies, change impact and test candidates. Project knowledge, knowledge relationships, agent investigation and project memory are part of the next release, **0.1.1**. Until it is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use them.
+The latest published release is **0.1.1**, with prebuilt Linux and macOS binaries for TypeScript/TSX code intelligence, project knowledge, knowledge relationships, agent investigation and project memory. JavaScript/JSX (`.js`, `.jsx`, `.mjs`, `.cjs`), `.mts`/`.cts`, and the `init`, `doctor` and `agent add` commands are part of the next release, **0.1.2**. Until it is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use them.
 
 The 0.1.0 binary cannot read indexes written by newer builds. It refuses them with `unsupported index schema` and changes nothing. A newer build upgrades a 0.1.0 index the next time you run `repogi index`.
 
@@ -21,7 +21,9 @@ The 0.1.0 binary cannot read indexes written by newer builds. It refuses them wi
 - [Navigation limits](REFERENCE_NAVIGATION_LIMITS.md): response budgets, traversal limits, freshness and uncertainty.
 - [Change impact](CHANGE_IMPACT.md) and [compact summaries](IMPACT_SUMMARIES.md): investigate Git changes and retrieve selected evidence.
 - [Affected-test discovery](AFFECTED_TEST_DISCOVERY.md): identify advisory test candidates without executing them.
+- [Developer experience](DEVELOPER_EXPERIENCE.md): `repogi init`, `repogi doctor` and `repogi agent add` (0.1.2).
 - [Claude Code](agents/claude-code.md) and [Codex](agents/codex.md): client setup.
+- [Agent outcome benchmark](AGENT_OUTCOMES.md): reproducible paired evaluation of a coding agent with and without Repogi.
 
 ## API and architecture
 

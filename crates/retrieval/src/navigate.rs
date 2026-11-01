@@ -157,11 +157,12 @@ pub fn find(store: &Store, selector: &Selector) -> Result<(Vec<Fact>, bool)> {
         return Err(fail(
             "symbol_not_found",
             format!(
-                "no indexed declaration named `{name}`{}; export aliases may name a different declaration. Use atlas_context to discover a declaration ID, or native Read/Grep (.ts/.tsx indexed only).{recovery}",
+                "no indexed declaration named `{name}`{}; export aliases may name a different declaration. Use atlas_context to discover a declaration ID, or native Read/Grep ({} indexed only).{recovery}",
                 selector
                     .path
                     .as_ref()
-                    .map_or_else(String::new, |path| format!(" in {path}"))
+                    .map_or_else(String::new, |path| format!(" in {path}")),
+                code_intel_core::language::SOURCE_EXTENSIONS_TEXT
             ),
         ));
     }

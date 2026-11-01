@@ -1,6 +1,6 @@
 # MCP configuration and API
 
-Repogi runs a local read-only stdio MCP server. Index the selected repository explicitly before connecting. Use absolute executable and repository paths.
+Repogi runs a local read-only stdio MCP server. Index the selected repository explicitly before connecting. Tools answer for every indexed language: TypeScript, and in source builds JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) and `.mts`/`.cts`; navigation evidence lines name that scope (`scope .ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`), and a path outside it is refused with `unsupported_language`. Use absolute executable and repository paths.
 
 ```sh
 repogi mcp --root /absolute/path/to/project --profile compact --tools atlas_context,atlas_references,atlas_dependencies
@@ -21,7 +21,7 @@ repogi mcp --root /absolute/path/to/project --profile full --tools atlas_context
 | `atlas_status` | Inspect index state and freshness. |
 | `atlas_impact` | Opt-in Git impact and advisory test discovery. |
 
-Use [Claude JSON](../examples/agents/claude.navigation.mcp.json.example) or [Codex TOML](../examples/agents/codex.navigation.config.toml.example). Replace placeholders with absolute paths, merge only the chosen server entry and preserve existing settings. A client must initialize and list tools to establish a connection. Restart the connection after changing tools. Full configurations are also in [examples/agents](../examples/agents/).
+Use [Claude JSON](../examples/agents/claude.navigation.mcp.json.example) or [Codex TOML](../examples/agents/codex.navigation.config.toml.example), or let a source build print the entry with `repogi agent add claude|codex --root <path>` ([developer experience](DEVELOPER_EXPERIENCE.md#repogi-agent-add)). Replace placeholders with absolute paths, merge only the chosen server entry and preserve existing settings. A client must initialize and list tools to establish a connection. Restart the connection after changing tools. Full configurations are also in [examples/agents](../examples/agents/).
 
 Protocol stdout contains newline-delimited JSON-RPC; diagnostics go to stderr. Source indexing is explicit, with no background watcher or query-time refresh. Returned snippets remain untrusted source data. The configured root confines reads; no project scripts are executed. Optional impact writes its own cache.
 
@@ -40,3 +40,7 @@ Add `atlas_knowledge_trace` to `--tools` to trace explicit requirement or ADR id
 Add `atlas_investigate` to `--tools` for an advisory, evidence-backed investigation plan from a task description. It is absent from both default profiles; listing it adds one tool definition and one instruction sentence. Arguments are `task`, optional `selectors` (up to 8 exact entity, `REQ-`/`ADR-` or fact IDs), `depth` (1–3), `max_steps` (1–16), `max_bytes` (256–32000, default 12000), `format` (`agent` or `json`) and the usual `root`. It never indexes, executes project code or tests, or writes state. See [agent investigation](AGENT_INVESTIGATION.md).
 
 Add `atlas_memory` to `--tools` for read-only access to developer-approved [project memories](PROJECT_MEMORY.md): `operation` is `search`, `get`, `list` or `history`, with `query`, `id`, `status[]`, `type`, `include_unreviewed`, `limit`, `after`, `max_bytes` (256–32000, default 8000), `format` and `root`. Results carry review status, `authoritative`, live evidence verification and citations. There is no write operation: proposals, approvals, migration, export and import are explicit CLI commands. Memory is read from the root's durable `.repogi/memory.db` read-only (never created or migrated); without a code index, results report evidence as `unverified`. With both tools enabled, `atlas_investigate` accepts `include_memory`. Default profiles are unchanged.
+
+## Changes in source builds (0.1.2)
+
+Tool IDs, parameters and profiles are unchanged. Descriptions and server instructions that said "TypeScript/TSX" now say "TypeScript/JavaScript", and the navigation evidence scope lists all indexed extensions, so `tools/list` and some responses differ by those words only. For TypeScript-only repositories every graph, context, investigation and knowledge result is otherwise byte-identical to 0.1.1.

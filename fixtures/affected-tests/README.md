@@ -18,7 +18,7 @@ Expected sets describe literal fixture imports and calls. They test static disco
 | File rename | Renamed `math.ts` also changes its function body; baseline/head target paths differ |
 | Helper barrel | A test calls `runTest` through a re-export without confusing the export site with a test call |
 | Name collision; unrelated colocation | Same-name calls to `src/other/math.ts` cannot be confirmed as consumers of `src/math.ts` |
-| Dynamic/unsupported; syntax error | JavaScript, syntax-error, generated and ignored tests have unknown semantic coverage |
+| Dynamic import; syntax error | `tests/dynamic.test.js` is indexed JavaScript, but its dynamic `import()` never confirms a link (at most possible); syntax-error, generated and ignored tests have unknown semantic coverage |
 | No known test consumer | `untested` has no usage site; filename/proximity remains possible |
 | Test addition/removal | Baseline-only and head-only tests both remain discoverable |
 | Large fan-out | 240 explicitly generated test imports/calls are independently expected, beyond legacy per-site caps |

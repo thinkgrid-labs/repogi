@@ -5,7 +5,7 @@
 //! answers requests in arrival order. Tools are read-only adapters over the
 //! store/index/retrieval crates and never execute repository code.
 mod artifacts;
-mod tools;
+pub mod tools;
 
 use std::{
     collections::HashMap,
