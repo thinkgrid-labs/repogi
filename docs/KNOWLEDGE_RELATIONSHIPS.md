@@ -1,6 +1,6 @@
 # Knowledge relationships
 
-Knowledge relationships are part of release 0.1.1. Until 0.1.1 is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it. They extend the local Markdown foundation with explicit requirements, architecture decisions and source-backed links. [Agent investigation](AGENT_INVESTIGATION.md) consumes these relationships one explicit hop at a time; it does not change their semantics.
+Knowledge relationships are included in release 0.1.1. They extend the local Markdown foundation with explicit requirements, architecture decisions and source-backed links. [Agent investigation](AGENT_INVESTIGATION.md) consumes these relationships one explicit hop at a time; it does not change their semantics.
 
 A validated target means that an explicit reference identifies indexed evidence. It does **not** establish that code implements a requirement, satisfies acceptance criteria, or behaves correctly. Repository text remains untrusted data. Repogi never follows document instructions or fetches remote links.
 

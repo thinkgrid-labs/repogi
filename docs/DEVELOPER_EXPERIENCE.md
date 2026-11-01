@@ -40,7 +40,7 @@ next:
 ```text
 $ repogi doctor
 repogi doctor: /home/me/ledgerlite
-  [ok  ] binary        repogi 0.1.1 on linux-x86_64
+  [ok  ] binary        repogi 0.1.2 on linux-x86_64
   [ok  ] repository    /home/me/ledgerlite (nearest index)
   [ok  ] index         schema 5, revision 1
   [ok  ] coverage      indexed javascript 15, jsx 1, tsx 1, typescript 1
@@ -55,8 +55,6 @@ repogi doctor: /home/me/ledgerlite
                        fix: repogi agent add codex --root /home/me/ledgerlite
 status: healthy
 ```
-
-Output from a source build; its version number stays 0.1.1 until the 0.1.2 version change.
 
 Doctor only reads. It never indexes, migrates a store or edits configuration. Each check is `ok`, `skipped`, `unsupported`, `warning` or `error`, with a fix when it is not `ok`. The command exits non-zero only when a check is an error; `--format json` gives the same checks as JSON.
 

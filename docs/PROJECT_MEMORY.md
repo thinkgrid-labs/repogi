@@ -1,6 +1,6 @@
 # Project memory
 
-Project memory, with durable storage, backup and recovery, is part of release 0.1.1. Until 0.1.1 is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
+Project memory, with durable storage, backup and recovery, is included in release 0.1.1.
 
 Project memory lets developers keep **reviewed project knowledge** across sessions: architecture decisions, constraints, requirements, conventions and implementation notes, each stated as a short claim with the indexed evidence it was based on. Coding agents can read approved memories, through the CLI, the opt-in `atlas_memory` MCP tool or `repogi investigate --include-memory`, instead of rediscovering the same decisions.
 
