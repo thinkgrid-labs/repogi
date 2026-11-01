@@ -1,6 +1,6 @@
 # Memory storage, backup and recovery
 
-Durable memory storage is part of release 0.1.1. Until 0.1.1 is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
+Durable memory storage is included in release 0.1.1.
 
 Repogi keeps two kinds of local state, in two directories:
 

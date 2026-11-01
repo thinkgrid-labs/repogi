@@ -1,6 +1,6 @@
 # Agent investigation
 
-Agent investigation is part of release 0.1.1. Until 0.1.1 is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
+Agent investigation is included in release 0.1.1.
 
 `repogi investigate` turns a development task into an ordered, evidence-backed **investigation plan**: where to start reading, which requirements and decisions govern the behavior, which static consumers and test candidates to look at, and what is unresolved, stale or missing. Every step cites indexed repository evidence and names a bounded next read or query.
 
