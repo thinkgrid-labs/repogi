@@ -3,7 +3,7 @@
 Repogi is a developer preview. Source repository: https://github.com/thinkgrid-labs/repogi.
 License: [MIT](../LICENSE). See [third-party notices](../THIRD_PARTY_NOTICES.md) for dependency licenses.
 
-> **Release status:** the latest release is **0.1.0**. Its prebuilt binaries cover TypeScript/TSX code intelligence only. Project knowledge search, `knowledge trace`, `investigate` and project memory are not in a release yet. They are part of the next release, 0.1.1. Until it is published, [build from source](#build-from-source) to use them.
+> **Release status:** the latest release is **0.1.1**. Its prebuilt binaries cover TypeScript/TSX code intelligence, project knowledge, `knowledge trace`, `investigate` and project memory. JavaScript/JSX indexing and the `init`, `doctor` and `agent add` commands are part of the next release, 0.1.2. Until it is published, [build from source](#build-from-source) to use them.
 
 Repogi is one self-contained executable, `repogi`. Running it needs no Rust, Cargo, Node.js or Python.
 

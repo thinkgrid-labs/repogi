@@ -196,10 +196,7 @@ fn classify(
     if !named && !folder {
         return None;
     }
-    let supported = matches!(
-        Path::new(path).extension().and_then(|ext| ext.to_str()),
-        Some("ts" | "tsx")
-    );
+    let supported = code_intel_core::language::Language::of(path).is_some();
     let class = if !relevant(path) || !supported {
         "unsupported_or_excluded"
     } else if !indexed.contains_key(path) || errors.contains(path) || missing.contains(path) {

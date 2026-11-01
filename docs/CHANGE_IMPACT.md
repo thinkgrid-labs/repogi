@@ -164,7 +164,7 @@ A confirmed static reference proves a dependency, not that the change breaks the
   - content filters, or line-ending conversion with CRLF files, on changed files;
   - submodules in the working tree, which the working-tree index reads but commit snapshots omit.
 
-The text header says "complete within the analysed static graph". JavaScript sources, `.mts`/`.cts`, packages, excluded directories and runtime behaviour are never analysed; they are always listed under `coverage.not_analysed`, so "complete" never means "all consumers in the program".
+The text header says "complete within the analysed static graph". CommonJS bindings, dynamic `import()`, packages, excluded directories and runtime behaviour are never analysed; they are always listed under `coverage.not_analysed`, so "complete" never means "all consumers in the program".
 
 `--max-bytes` shrinks the least important lists first, by binary search:
 1. coverage detail;
@@ -193,7 +193,7 @@ Truncated output always has `truncated: true` and `complete: false`. JSON stays 
 - Nested declarations are not targets.
 - Instance and inherited method dispatch is not resolved; such calls appear only as unconfirmed same-name member sites.
 - Values passed through props, registries or `memo(X)` + `X.displayName = …` (mutated bindings) appear as unconfirmed same-name sites.
-- Package and JavaScript consumers are not analysed.
+- Package consumers and CommonJS (`require`) consumers are not analysed. JavaScript ES-module consumers are analysed in source builds.
 - Files with syntax errors have no semantic edges.
 - Overloads and merged declarations can only be paired by position when several change at once (`uncertain`).
 - A rename is never inferred.

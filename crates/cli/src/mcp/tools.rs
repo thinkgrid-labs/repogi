@@ -72,10 +72,10 @@ impl Profile {
     pub fn instructions(self) -> &'static str {
         match self {
             Self::Full => {
-                "Atlas: indexed TypeScript/TSX evidence, not live edits. atlas_context discovers declarations; atlas_symbol inspects a returned ID; atlas_references lists direct users; atlas_dependencies traverses upstream consumers or downstream dependencies by depth. Selected-file byte checks do not verify graph freshness; atlas_status checks the full index. Use native Read/Grep for literals, known files and other languages; inspect source before editing."
+                "Atlas: indexed TypeScript/JavaScript evidence, not live edits. atlas_context discovers declarations; atlas_symbol inspects a returned ID; atlas_references lists direct users; atlas_dependencies traverses upstream consumers or downstream dependencies by depth. Selected-file byte checks do not verify graph freshness; atlas_status checks the full index. Use native Read/Grep for literals, known files and other languages; inspect source before editing."
             }
             Self::Compact => {
-                "Atlas: indexed TypeScript/TSX declarations, not live edits. Discover identifiers with atlas_context; inspect a returned ID with atlas_symbol. Selected-file checks do not verify graph freshness. Use native Read/Grep for known files, literals and other languages."
+                "Atlas: indexed TypeScript/JavaScript declarations, not live edits. Discover identifiers with atlas_context; inspect a returned ID with atlas_symbol. Selected-file checks do not verify graph freshness. Use native Read/Grep for known files, literals and other languages."
             }
         }
     }
@@ -200,9 +200,9 @@ impl Server {
             )
         });
         let mut text = String::from(if navigation || !self.tools.contains(&"atlas_impact") {
-            "Atlas: read-only TypeScript/TSX index from the last `repogi index` run."
+            "Atlas: read-only TypeScript/JavaScript index from the last `repogi index` run."
         } else {
-            "Atlas: read-only static analysis of TypeScript/TSX changes."
+            "Atlas: read-only static analysis of TypeScript/JavaScript changes."
         });
         if self.tools.contains(&"atlas_impact") {
             text.push_str(" atlas_impact reviews Git changes: choose summary for files, tests for verification planning, or focused evidence. Possible/lost bindings need inspection; complete never means safe.");
@@ -485,7 +485,8 @@ impl Server {
                 return Err(ToolError::new(
                     "unsupported_language",
                     format!(
-                        "{path:?} is outside indexed language coverage (.ts/.tsx only); use native Read/Grep for this file; no claim is made about its declarations"
+                        "{path:?} is outside indexed language coverage ({}); use native Read/Grep for this file; no claim is made about its declarations",
+                        code_intel_core::language::SOURCE_EXTENSIONS_TEXT
                     ),
                 ));
             }
@@ -1608,9 +1609,9 @@ impl Kit {
             "atlas_context" => (
                 "Atlas: task context",
                 if self.full {
-                    "Ranked TypeScript/TSX declarations from the local index, with IDs and locations. Matches identifiers and name fragments; prose can miss differently named code. For broad tasks use detail=overview, then `select` IDs or atlas_symbol instead of reading whole files."
+                    "Ranked TypeScript/JavaScript declarations from the local index, with IDs and locations. Matches identifiers and name fragments; prose can miss differently named code. For broad tasks use detail=overview, then `select` IDs or atlas_symbol instead of reading whole files."
                 } else {
-                    "Find TypeScript/TSX declarations by identifiers or name fragments: ranked items with IDs and source. For broad tasks use detail=overview, then pass IDs in `select`."
+                    "Find TypeScript/JavaScript declarations by identifiers or name fragments: ranked items with IDs and source. For broad tasks use detail=overview, then pass IDs in `select`."
                 },
                 json!({
                     "task": {"type":"string","description":"Identifiers, name fragments or keywords."},
@@ -1769,7 +1770,7 @@ impl Kit {
 
     fn impact_description(&self) -> &'static str {
         if self.full {
-            "Review Git TypeScript/TSX impact: choose summary=true for files, tests=true for tests, or evidence_file for details; do not combine summary with tests/detail/evidence_file. manifest/artifact provide durable verification handoff. No tests run; complete never means safe. First analysis builds snapshots; repeats reuse them."
+            "Review Git TypeScript/JavaScript impact: choose summary=true for files, tests=true for tests, or evidence_file for details; do not combine summary with tests/detail/evidence_file. manifest/artifact provide durable verification handoff. No tests run; complete never means safe. First analysis builds snapshots; repeats reuse them."
         } else {
             "Static change impact: summary=true for files, tests=true for test recommendations, evidence_file for evidence. manifest=true prepares a complete verification artifact descriptor; artifact retrieves immutable bytes for handoff/CI. Nothing runs; complete never means safe."
         }

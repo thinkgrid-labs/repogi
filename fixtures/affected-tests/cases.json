@@ -56,7 +56,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -115,7 +114,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -145,7 +143,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -204,7 +201,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ],
@@ -269,7 +265,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ],
@@ -297,7 +292,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -322,7 +316,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -396,7 +389,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ],
@@ -427,7 +419,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -486,7 +477,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ],
@@ -547,7 +537,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -599,10 +588,11 @@
      "name": "process"
     }
    },
-   "possible": [],
+   "possible": [
+    "tests/dynamic.test.js"
+   ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -659,7 +649,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -681,7 +670,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -741,7 +729,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ],
@@ -810,7 +797,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ],
@@ -832,7 +818,6 @@
    ],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]
@@ -851,7 +836,6 @@
    "possible": [],
    "unknown": [
     "tests/broken.test.ts",
-    "tests/dynamic.test.js",
     "generated/excluded.test.ts",
     "ignored/tracked.test.ts"
    ]

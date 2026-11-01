@@ -586,12 +586,18 @@ fn unknown_coverage_and_unsupported_configuration_stay_distinct() {
         .iter()
         .map(|f| (f["path"].as_str().unwrap(), f))
         .collect();
-    let js = unknown["tests/dynamic.test.js"];
-    assert_eq!(js["snapshots"]["head"], "unsupported_or_excluded");
+    // JavaScript tests are indexed; a dynamic import still confirms nothing.
+    let possible = report["possible"].as_array().unwrap();
+    let js = possible
+        .iter()
+        .find(|f| f["path"] == "tests/dynamic.test.js")
+        .unwrap();
+    assert!(!unknown.contains_key("tests/dynamic.test.js"));
+    assert_eq!(js["snapshots"]["head"], "supported_indexed");
     assert!(
         js["reasons"]
             .to_string()
-            .contains("unsupported test language")
+            .contains("static target unverified")
     );
     let broken = unknown["tests/broken.test.ts"];
     assert_eq!(broken["snapshots"]["head"], "recognized_unindexed");

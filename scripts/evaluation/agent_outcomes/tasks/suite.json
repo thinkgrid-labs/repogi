@@ -1,0 +1,161 @@
+{
+  "schema": "repogi-agent-outcomes-suite/1",
+  "id": "ledgerlite-v1",
+  "description": "Six development tasks on a small mixed JavaScript/TypeScript repository with Markdown decisions and requirements. Graders are hidden from the agent and run only after the session ends.",
+  "repository": {
+    "fixture": "fixtures/agent-outcomes/repo",
+    "license": "MIT (part of the Repogi source tree)"
+  },
+  "requirements": {
+    "node": ">=20",
+    "git": "any"
+  },
+  "tasks": [
+    {
+      "id": "bugfix-negative-price",
+      "category": "bug_fix",
+      "kind": "change",
+      "prompt": "Refund amounts are displayed wrongly: a refund of five dollars renders as \"$-5.00\" but must render as \"-$5.00\" (sign first, then the currency symbol). Fix the display bug. Keep the existing behavior for positive amounts. Do not change deprecated code. Keep the existing test suite (`npm test`) passing.",
+      "grading": [
+        {
+          "type": "hidden_tests",
+          "path": "hidden/bugfix-negative-price"
+        },
+        {
+          "type": "project_tests"
+        },
+        {
+          "type": "changed_within",
+          "allow": [
+            "src/money/format.js",
+            "tests/**"
+          ]
+        },
+        {
+          "type": "unchanged",
+          "paths": [
+            "src/legacy/format.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "feature-free-shipping",
+      "category": "requirements",
+      "kind": "change",
+      "prompt": "Implement requirement REQ-12 from the project's requirement documents. Add or update tests as you see fit. Keep the existing test suite (`npm test`) passing.",
+      "grading": [
+        {
+          "type": "hidden_tests",
+          "path": "hidden/feature-free-shipping"
+        },
+        {
+          "type": "changed_within",
+          "allow": [
+            "src/checkout/**",
+            "src/cart/**",
+            "tests/**"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "refactor-rename-session",
+      "category": "refactor",
+      "kind": "change",
+      "prompt": "Rename the exported function getUserSession to loadSession and update every use of it in the repository, including tests and UI components. Do not keep the old name as an alias, and do not make unrelated changes. Keep the existing test suite (`npm test`) passing.",
+      "grading": [
+        {
+          "type": "hidden_tests",
+          "path": "hidden/refactor-rename-session"
+        },
+        {
+          "type": "project_tests"
+        },
+        {
+          "type": "pattern_absent",
+          "glob": [
+            "src/**",
+            "tests/**"
+          ],
+          "pattern": "\\bgetUserSession\\b"
+        },
+        {
+          "type": "changed_within",
+          "allow": [
+            "src/lib/session.js",
+            "src/api/orders.js",
+            "src/components/Header.tsx",
+            "tests/session.test.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "feature-discount",
+      "category": "feature",
+      "kind": "change",
+      "prompt": "Add a discountCents option to checkout(). The discount is an integer number of cents taken off the item subtotal before tax and before the shipping rate is chosen; it can never make the subtotal negative (cap it at the subtotal). Reject negative or non-integer discounts with a RangeError. The receipt must report the discount actually applied as discountCents (0 when none). Keep the existing test suite (`npm test`) passing.",
+      "grading": [
+        {
+          "type": "hidden_tests",
+          "path": "hidden/feature-discount"
+        },
+        {
+          "type": "project_tests"
+        },
+        {
+          "type": "changed_within",
+          "allow": [
+            "src/checkout/**",
+            "tests/**"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "architecture-integer-cents",
+      "category": "architecture",
+      "kind": "question",
+      "prompt": "Why does this codebase represent money the way it does, and where is the conversion implemented? Answer in a short paragraph without modifying any files. End your answer with one line of the form `CITATIONS: path:line, path:line, ...` citing the design decision and the implementing code.",
+      "grading": [
+        {
+          "type": "no_changes"
+        },
+        {
+          "type": "answer_citations",
+          "prefix": "CITATIONS:",
+          "required_paths": [
+            "docs/adr/ADR-001-integer-cents.md",
+            "src/money/cents.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tests-for-apply-tax",
+      "category": "test_selection",
+      "kind": "question",
+      "prompt": "Before changing how applyTax rounds, I need to know which existing test files exercise it directly or through other code. Do not modify or run anything. End your answer with one line of the form `TESTS: path, path, ...` listing every such test file and nothing else.",
+      "grading": [
+        {
+          "type": "no_changes"
+        },
+        {
+          "type": "answer_paths",
+          "prefix": "TESTS:",
+          "required": [
+            "tests/tax.test.js",
+            "tests/checkout.test.js",
+            "tests/orders.test.js"
+          ],
+          "forbidden": [
+            "tests/cart.test.js",
+            "tests/format.test.js",
+            "tests/session.test.js"
+          ]
+        }
+      ]
+    }
+  ]
+}

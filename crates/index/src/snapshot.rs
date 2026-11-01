@@ -561,13 +561,13 @@ fn listing(dir: &Path) -> Result<BTreeSet<String>> {
     Ok(paths)
 }
 
-// Extensions are matched exactly, like the indexer's `ts`/`tsx` rule.
+// Extensions are matched exactly, like the indexer's source rule.
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn category(path: &str) -> &'static str {
     let name = path.rsplit('/').next().unwrap_or(path);
     if name == ".gitignore" {
         "ignore_rules"
-    } else if name.ends_with(".ts") || name.ends_with(".tsx") {
+    } else if code_intel_core::language::Language::of(name).is_some() {
         "source"
     } else if (name.starts_with("tsconfig") || name.starts_with("jsconfig"))
         && name.ends_with(".json")

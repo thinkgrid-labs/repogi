@@ -5,7 +5,7 @@
 
 **Local, source-backed repository intelligence for developers and AI coding agents.**
 
-Repogi is a Rust CLI and Model Context Protocol (MCP) server. It indexes TypeScript/TSX code and Markdown project knowledge on your machine and answers the questions agents usually work out with rounds of grep and file reads: *where is this declared, what uses it, what does the project require, and what might this change affect?* Each answer cites files and lines and says what Repogi could not confirm.
+Repogi is a Rust CLI and Model Context Protocol (MCP) server. It indexes TypeScript and JavaScript code (including TSX and JSX) and Markdown project knowledge on your machine and answers the questions agents usually work out with rounds of grep and file reads: *where is this declared, what uses it, what does the project require, and what might this change affect?* Each answer cites files and lines and says what Repogi could not confirm.
 
 [Quick start](#quick-start) · [What it can do](#what-repogi-can-do) · [How it works](#how-repogi-works) · [Connect an agent](#connect-a-coding-agent) · [Limitations](#limitations) · [Roadmap](ROADMAP.md)
 
@@ -28,14 +28,14 @@ Repogi helps most on questions with many static consumers or several dependency 
 
 ### Install a prebuilt binary
 
-Release **0.1.0** provides prebuilt binaries for Linux (x86_64, ARM64; glibc 2.34+) and macOS 11+ (Intel, Apple silicon). The installer verifies the download's SHA-256 checksum and installs into `~/.local/bin` without `sudo`:
+Release **0.1.1** provides prebuilt binaries for Linux (x86_64, ARM64; glibc 2.34+) and macOS 11+ (Intel, Apple silicon). The installer verifies the download's SHA-256 checksum and installs into `~/.local/bin` without `sudo`:
 
 ```sh
 curl -fsSL https://github.com/thinkgrid-labs/repogi/releases/latest/download/install.sh | sh
 repogi --version
 ```
 
-> **Release status:** 0.1.0 contains code intelligence only (context, references, dependencies, change impact and test candidates). Project knowledge, `knowledge trace`, `investigate` and project memory are not in a release yet. To use them, build from source. Windows is not supported yet. See [installation](docs/DEVELOPER_PREVIEW_INSTALLATION.md) for verification options and [release assets](docs/RELEASES.md).
+> **Release status:** 0.1.1 indexes TypeScript and TSX and includes code intelligence, project knowledge, `knowledge trace`, `investigate` and project memory. JavaScript and JSX indexing and the `init`, `doctor` and `agent add` commands are part of the next release, 0.1.2; build from source to use them until it is published. Windows is not supported yet. See [installation](docs/DEVELOPER_PREVIEW_INSTALLATION.md) for verification options and [release assets](docs/RELEASES.md).
 
 ### Build from source
 
@@ -53,17 +53,14 @@ This installs one `repogi` executable into Cargo's bin directory (usually `~/.ca
 ### Index a repository
 
 ```sh
-cd /path/to/your/typescript-project
+cd /path/to/your/project
+repogi init        # find the root, count sources, make Git ignore the index
 repogi index .
-repogi status
+repogi doctor      # read-only health check with suggested fixes
 repogi context "authentication flow" --format text
 ```
 
-The index is written inside the project, in `.code-intel/`. Add it to your `.gitignore` so it is never committed:
-
-```sh
-echo ".code-intel/" >> .gitignore
-```
+The index is written inside the project, in `.code-intel/`. `repogi init` writes `.code-intel/.gitignore` so Git ignores it without touching any tracked file; it is idempotent and never changes memories or agent configuration. With a build that has no `init` (0.1.1 and earlier), add `.code-intel/` to your `.gitignore` instead. See [developer experience](docs/DEVELOPER_EXPERIENCE.md).
 
 Indexing is explicit and incremental. Rerun `repogi index .` after edits; unchanged files are skipped by content hash. Queries never re-index on their own, and when indexed files have changed since the last run, responses flag the evidence as stale. Git is needed only for change-impact commands.
 
@@ -77,12 +74,14 @@ Indexing is explicit and incremental. Rerun `repogi index .` after edits; unchan
 | What might my Git change affect? | `repogi impact --base main` | `atlas_impact` (opt-in) | 0.1.0 |
 | Which tests are statically linked to this change? | `repogi impact --base HEAD --tests` | `atlas_impact` with `tests` | 0.1.0 |
 | Is the index current? | `repogi status` | `atlas_status` | 0.1.0 |
-| What does the project require or record? | `repogi knowledge search "authentication requirements"` | `atlas_context` with `scope: "docs"` | source |
-| What explicitly links a requirement, decision and code? | `repogi knowledge trace REQ-AUTH-001` | `atlas_knowledge_trace` (opt-in) | source |
-| Where should I start investigating this task? | `repogi investigate "Modify session expiration"` | `atlas_investigate` (opt-in) | source |
-| What did we already decide, and is it still supported? | `repogi memory search "session storage"` | `atlas_memory` (opt-in, read-only) | source |
+| What does the project require or record? | `repogi knowledge search "authentication requirements"` | `atlas_context` with `scope: "docs"` | 0.1.1 |
+| What explicitly links a requirement, decision and code? | `repogi knowledge trace REQ-AUTH-001` | `atlas_knowledge_trace` (opt-in) | 0.1.1 |
+| Where should I start investigating this task? | `repogi investigate "Modify session expiration"` | `atlas_investigate` (opt-in) | 0.1.1 |
+| What did we already decide, and is it still supported? | `repogi memory search "session storage"` | `atlas_memory` (opt-in, read-only) | 0.1.1 |
+| Is my setup healthy, and how do I connect an agent? | `repogi init`, `repogi doctor`, `repogi agent add claude` | — | source |
+| The same questions for JavaScript and JSX code | all of the above | all of the above | source |
 
-*Release* is the first release that includes the capability; *source* means build from source for now.
+*Release* is the first release that includes the capability; *source* means build from source until the next release.
 
 ### Navigate code
 
@@ -90,7 +89,7 @@ A reference answer looks like this (abridged):
 
 ```text
 atlas references r1 · refreshSession · function:src/auth.ts:7:63 · L1 · 3 resolved, 0 unconfirmed edge(s) · complete · 807/4000 bytes
-evidence: indexed snapshot; source=matched_at_read (1 checked, 0 unchecked); graph freshness unverified; scope .ts/.tsx only
+evidence: indexed snapshot; source=matched_at_read (1 checked, 0 unchecked); graph freshness unverified; scope .ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs
 available: 3 resolved, 0 unconfirmed; returned: 3 + 0; omitted: 0 (exact); unconfirmed included: true
 
 resolved:
@@ -137,19 +136,19 @@ Nothing is memorized automatically. A memory exists only after an explicit `prop
 
 ## How Repogi works
 
-`repogi index` builds a local repository intelligence index. It parses TypeScript/TSX with Tree-sitter and resolves imports, path aliases, re-exports and JSX component use into a static code graph. It splits Markdown into searchable sections and extracts explicit requirement IDs, ADR metadata and links as knowledge relationships. All of this is stored in one rebuildable SQLite database, `.code-intel/index.db`. Retrieval answers questions from that index with source-backed, bounded results.
+`repogi index` builds a local repository intelligence index. It parses TypeScript and JavaScript with Tree-sitter (each with its own grammar and module-resolution rules) and resolves imports, path aliases, re-exports and JSX component use into one static code graph, including references between JavaScript and TypeScript files. It splits Markdown into searchable sections and extracts explicit requirement IDs, ADR metadata and links as knowledge relationships. All of this is stored in one rebuildable SQLite database, `.code-intel/index.db`. Retrieval answers questions from that index with source-backed, bounded results.
 
 Reviewed project memory is stored separately, in `.repogi/memory.db`. Memories enter it only through explicit CLI review, keep their evidence snapshots and review history, and survive re-indexing. Their evidence is re-verified against the index, and investigations recall approved memories only when asked. Developers and coding agents use all of this through the CLI and read-only MCP tools.
 
 <div align="center">
-  <img src="assets/repogi-flow.svg" alt="Repogi architecture. Source code and project knowledge are indexed into the rebuildable Repogi index at .code-intel/index.db: static code graph, document search and knowledge relationships. Retrieval provides context, trace, investigation and change impact through the CLI and read-only MCP tools. Project memory is a separate durable store at .repogi/memory.db, written only through explicit review with the CLI, re-verified against the index and optionally recalled by retrieval." width="100%" />
+  <img src="assets/repogi-flow.svg" alt="Repogi architecture. Source code (TypeScript and JavaScript) and project knowledge are indexed into the rebuildable Repogi index at .code-intel/index.db: static code graph, document search and knowledge relationships. Retrieval provides context, trace, investigation and change impact through the CLI and read-only MCP tools. Project memory is a separate durable store at .repogi/memory.db, written only through explicit review with the CLI, re-verified against the index and optionally recalled by retrieval." width="100%" />
 </div>
 
 <details>
 <summary>Text-only architecture diagram</summary>
 
 ```text
-Source code (TypeScript, TSX)    Project knowledge (Markdown, PRDs, ADRs)
+Source code (TypeScript, JavaScript)    Project knowledge (Markdown, PRDs, ADRs)
                \                     /
                 v                   v
       Repogi index — .code-intel/index.db — REBUILDABLE
@@ -178,6 +177,13 @@ Discovery respects `.gitignore`. It always skips `node_modules`, `.git`, `.code-
 
 `repogi mcp` runs a local MCP server over stdio. It does not start an agent and makes no model or network calls. The recommended navigation setup lists three tools: `atlas_context`, `atlas_references` and `atlas_dependencies`.
 
+Source builds can print the entry for you, with this executable's absolute path and an explicit repository root. Nothing is written unless you add `--write`, and an existing client file is never rewritten:
+
+```sh
+repogi agent add claude --root "$PWD"            # or: repogi agent add codex --root "$PWD"
+repogi agent add claude --root "$PWD" --write    # creates .mcp.json only if it does not exist
+```
+
 ### Claude Code
 
 Run this in the repository you want the agent to inspect:
@@ -193,7 +199,7 @@ claude mcp add --transport stdio --scope local repogi -- "$(command -v repogi)" 
 
 ### Codex
 
-Add an entry to the trusted project's `.codex/config.toml`, using absolute paths (`command -v repogi` prints the executable path):
+Add an entry to the project's `.codex/config.toml`, using absolute paths (`command -v repogi` prints the executable path). Codex reads a project configuration only after you trust the project:
 
 ```toml
 [mcp_servers.repogi]
@@ -227,6 +233,9 @@ One `repogi` executable serves any number of projects. Each repository has its o
 
 | Command | Purpose |
 | --- | --- |
+| `repogi init [path]` | Find the repository root, report sources, make Git ignore the index (`--index` also indexes; `--dry-run` writes nothing). |
+| `repogi doctor [path]` | Read-only diagnostics with fixes (`--freshness` also hashes sources; `--format json`). |
+| `repogi agent add <claude\|codex> --root <path>` | Print (or with `--write`, create) a project MCP entry for one repository. |
 | `repogi index <path>` | Create or update the local index (JSON run report). |
 | `repogi status` | Inspect the nearest index (JSON). |
 | `repogi context <task>` | Ranked, budgeted source evidence (`--format text` or JSON; `--scope code,docs`). |
@@ -247,7 +256,7 @@ repogi impact --base main --head feature --detail --depth 3
 repogi impact --base HEAD~1 --head HEAD --format json
 ```
 
-Most commands only read. `repogi index` writes `.code-intel/`, impact analysis writes its snapshot cache under `.code-intel/impact/`, and the memory write commands write `.repogi/`. **Experimental:** verification manifests (`impact --manifest`, `manifest-verify`) and `context --retrieval semantic` are evolving interfaces.
+Most commands only read. `repogi init` writes only `.code-intel/.gitignore`, `repogi agent add --write` creates a missing `.mcp.json` or `.codex/config.toml`, `repogi index` writes `.code-intel/`, impact analysis writes its snapshot cache under `.code-intel/impact/`, and the memory write commands write `.repogi/`. **Experimental:** verification manifests (`impact --manifest`, `manifest-verify`) and `context --retrieval semantic` are evolving interfaces.
 
 ## Privacy and safety
 
@@ -262,15 +271,15 @@ Most commands only read. `repogi index` writes `.code-intel/`, impact analysis w
 
 | Area | Current scope |
 | --- | --- |
-| **Languages** | TypeScript `.ts` and TSX `.tsx`. JavaScript, JSX, `.mts`, `.cts` and other languages are not indexed. A query with no matches says that other languages were not searched. |
-| **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. Package imports, instance dispatch and dynamic imports are not fully resolved. |
-| **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps ([details](docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md)). |
+| **Languages** | TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`) and, in source builds, JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`). Python, Rust and other languages are not indexed. A query with no matches says that other languages were not searched. |
+| **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. Package imports, `package.json` `exports`, instance dispatch (`this.method()`), CommonJS `require`/`module.exports` and dynamic `import()` stay unconfirmed. |
+| **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps ([details](docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md)); the JavaScript grammar (0.23.1) does not parse Flow annotations, so such files are indexed as partial. |
 | **Project knowledge** | Markdown only, with local lexical section search. Documents record intent and do not prove code behavior. |
 | **Project memory** | Explicitly proposed and reviewed claims only. Verification checks cited bytes and identities, not truth. Search is lexical. Reviewer names are self-reported labels, not authenticated identities, and export digests are integrity checks, not signatures. Back up with `repogi memory export`. |
 | **Freshness** | Manual. Rerun `repogi index` after edits. Changed files are flagged as stale. |
 | **Static analysis** | A graph dependency is not proof that a change breaks anything. Static test links do not show that a test runs or covers the code. Runtime and HTTP consumers are not analyzed. |
 | **Investigation** | Advisory plans from lexical discovery, one explicit-claim hop and bounded static walks. Not an autonomous agent: nothing is executed or verified, and plans are not stored. |
-| **Agent results** | Benefits depend on the task and on how the agent uses its tools. Repogi does not guarantee token, time or cost savings, or more accurate answers, on any given repository. |
+| **Agent results** | Benefits depend on the task and on how the agent uses its tools. Repogi does not guarantee token, time or cost savings, or more accurate answers, on any given repository. A [paired benchmark harness](docs/AGENT_OUTCOMES.md) can measure this; no results from it are published yet. |
 | **Platforms** | Prebuilt binaries for Linux (glibc 2.34+) and macOS 11+. No Windows support yet. Durable memory storage has so far been validated on Linux only. |
 
 More: [navigation limits](docs/REFERENCE_NAVIGATION_LIMITS.md), [change impact](docs/CHANGE_IMPACT.md), [affected-test discovery](docs/AFFECTED_TEST_DISCOVERY.md), [supported languages](docs/SUPPORTED_LANGUAGES.md).
@@ -307,7 +316,7 @@ Nothing. Memories live in `.repogi/memory.db`. Without an index they still read,
 
 ## Roadmap
 
-Next come the 0.1.1 release, a reproducible evaluation with real coding agents, and language support beyond TypeScript, starting with JavaScript. The [public roadmap](ROADMAP.md) lists priorities, status and completion criteria.
+Next come the 0.1.2 release (JavaScript and JSX, `init`, `doctor` and agent setup) and the first measured runs of the [agent outcome benchmark](docs/AGENT_OUTCOMES.md). The [public roadmap](ROADMAP.md) lists priorities, status and completion criteria.
 
 ## Documentation and contributing
 

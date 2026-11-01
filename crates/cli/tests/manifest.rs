@@ -312,15 +312,15 @@ fn unsupported_syntax_dynamic_imports_and_collisions_remain_unverified() {
     let confirmed = value["verification"]["confirmed"].as_array().unwrap();
     assert_eq!(confirmed.len(), 1);
     assert_eq!(confirmed[0]["path"], "src/math.test.ts");
-    for path in ["src/javascript.test.js", "src/grammar.test.ts"] {
-        assert!(
-            value["verification"]["unknown"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|r| r["path"] == path)
-        );
-    }
+    // `src/javascript.test.js` is indexed JavaScript now; it imports nothing,
+    // so it is never confirmed (checked by the count above) and never executed.
+    assert!(
+        value["verification"]["unknown"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["path"] == "src/grammar.test.ts")
+    );
     for path in [
         "tests/math.test.ts",
         "src/unresolved.test.ts",

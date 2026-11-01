@@ -112,7 +112,16 @@ pub fn dependencies(
                         source_path: edge.location.path.clone(),
                         start_line: edge.location.start_line,
                         end_line: edge.location.end_line,
-                        extraction_method: "typescript_static_binder_v1".into(),
+                        extraction_method: if code_intel_core::language::Language::of(
+                            &edge.location.path,
+                        )
+                        .is_some_and(code_intel_core::language::Language::is_javascript)
+                        {
+                            "javascript_static_binder_v1"
+                        } else {
+                            "typescript_static_binder_v1"
+                        }
+                        .into(),
                         confidence: "verified_static".into(),
                     },
                     resolution: Some(edge.status),

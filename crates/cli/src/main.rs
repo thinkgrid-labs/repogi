@@ -1,6 +1,7 @@
 mod manifest_artifact;
 mod mcp;
 mod memory_command;
+mod setup;
 
 use std::{
     io::{self, Write},
@@ -34,6 +35,37 @@ enum Command {
         expected_manifest_id: Option<String>,
         #[arg(long)]
         expected_envelope_digest: Option<String>,
+    },
+    /// Prepare a repository: detect its root and languages, make Git ignore the
+    /// index (`.code-intel/.gitignore`), and show next steps. Idempotent; never
+    /// changes tracked files, memories or agent configuration.
+    Init {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Also build the index now.
+        #[arg(long)]
+        index: bool,
+        /// Report what would change; write nothing.
+        #[arg(long, conflicts_with = "index")]
+        dry_run: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Read-only diagnostics for the binary, index, memory store, ignore rules
+    /// and Claude Code project setup. Never re-indexes, migrates or edits files.
+    Doctor {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Also hash every source to compare the index with the working tree.
+        #[arg(long)]
+        freshness: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Connect a coding agent to one repository over MCP.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
     },
     /// Index a repository offline. Outputs a JSON run report. Memories still
     /// stored in a schema-5 index are first migrated to .repogi/memory.db.
@@ -173,6 +205,30 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum AgentCommand {
+    /// Print the MCP entry for this binary and one repository. For Claude Code,
+    /// `--write` creates a project `.mcp.json` only when none exists; Codex
+    /// configuration is user-wide, so it is only printed.
+    Add {
+        #[arg(value_enum)]
+        client: setup::Client,
+        /// Repository the server may read (required; one repository per entry).
+        #[arg(long)]
+        root: PathBuf,
+        /// Tools to enable (default: navigation). Memory, impact and
+        /// investigation stay opt-in.
+        #[arg(long, default_value = setup::NAVIGATION_TOOLS)]
+        tools: String,
+        /// Server name in the client configuration.
+        #[arg(long, default_value = "repogi")]
+        name: String,
+        /// Create the Claude Code project file (never overwrites one).
+        #[arg(long)]
+        write: bool,
+    },
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum OutputFormat {
     Json,
@@ -230,6 +286,28 @@ enum ContextDetail {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Doctor prints its report either way and fails only on error checks.
+    if let Command::Doctor {
+        path,
+        freshness,
+        format,
+    } = &cli.command
+    {
+        let report = setup::doctor(path, *freshness);
+        let text = match format {
+            OutputFormat::Json => format!(
+                "{}\n",
+                serde_json::to_string(&report).expect("doctor report serializes")
+            ),
+            OutputFormat::Text => setup::render_doctor(&report),
+        };
+        let _ = io::stdout().lock().write_all(text.as_bytes());
+        return if report.failed() {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        };
+    }
     match run(cli) {
         Ok(output) => match io::stdout().lock().write_all(output.as_bytes()) {
             Ok(()) => ExitCode::SUCCESS,
@@ -287,6 +365,32 @@ fn run(cli: Cli) -> Result<String> {
             );
             Ok(format!("{}\n", verified.report()))
         }
+        Command::Doctor { .. } => unreachable!("handled in main"),
+        Command::Init {
+            path,
+            index,
+            dry_run,
+            format,
+        } => {
+            let report = setup::init(&path, dry_run, index, &|root| {
+                preserve_memories(root);
+                code_intel_index::index(root)
+            })?;
+            Ok(match format {
+                OutputFormat::Json => format!("{}\n", serde_json::to_string(&report)?),
+                OutputFormat::Text => setup::render_init(&report),
+            })
+        }
+        Command::Agent {
+            command:
+                AgentCommand::Add {
+                    client,
+                    root,
+                    tools,
+                    name,
+                    write,
+                },
+        } => setup::agent_add(client, &root, &tools, &name, write),
         Command::Index { path } => {
             preserve_memories(&path);
             Ok(format!(

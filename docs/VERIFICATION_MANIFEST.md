@@ -21,7 +21,7 @@ finding is dropped to make an artifact fit. Analysis limits still apply:
 Their effect is recorded separately from output omissions. Discovered evidence
 is retained even when those limits make discovery non-exhaustive.
 
-Indexed-source digests alone omit JavaScript/JSON contents. The shared file
+Indexed-source digests alone omit JSON and other unindexed contents. The shared file
 comparison also retains BLAKE3 digests of its sorted path-to-Git-blob-OID maps.
 Manifest mode rehashes the relevant working files at the end to verify identity. This is a read-only integrity pass, not another diff
 or graph analysis. Modes, ignored files and unsupported filesystem states remain
@@ -57,7 +57,7 @@ arbitrary revisions. The containing manifest supplies snapshot identity.
 
 `snapshots.base/head.file_manifest_digest` hashes the compact JSON of the
 comparison's sorted repository-relative path-to-raw-Git-blob-OID map. This
-distinguishes relevant JavaScript/JSON edits as well as indexed-source changes.
+distinguishes relevant JSON and other unindexed edits as well as indexed-source changes.
 It supplements `source_digest`, `test_inventory_digest` and `resolution_digest`.
 `file_inputs_verified` records the final working-tree rehash; commit inputs use
 their immutable trees. `git_metadata_verified` compares before/after HEAD and
@@ -100,7 +100,7 @@ behavioural coverage is always unknown. No `safe` or
 established, without assigning risk or claiming that tests do not exist.
 
 Known gaps remain explicit: dynamic imports/runtime dispatch, external packages,
-JavaScript tests, excluded test paths, uninterpreted configuration and the
+CommonJS-only test links, excluded test paths, uninterpreted configuration and the
 [import-type grammar limitation](TYPESCRIPT_GRAMMAR_LIMITATIONS.md). A work limit
 can hide undiscovered findings whose number is unknown; known inherited list
 omissions are counted separately. Successful serialization has no output

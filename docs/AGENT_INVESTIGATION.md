@@ -188,7 +188,7 @@ These are small hand-labeled fixtures, labelled by the developers. They show tha
 
 ## Known limitations
 
-- Discovery is lexical. Prose that names code differently can miss it, and a lexical match is never a relationship. Only TypeScript/TSX and Markdown are indexed.
+- Discovery is lexical. Prose that names code differently can miss it, and a lexical match is never a relationship. Only TypeScript, JavaScript (in source builds) and Markdown are indexed.
 - Task cues are keyword lists, not intent understanding. The suffix trim is not a linguistic stemmer.
 - Knowledge expansion is one explicit hop from each seed. Deeper chains need `repogi knowledge trace`.
 - A claim that targets a file is expanded to at most 8 of its declarations; which of them matter is decided by lexical corroboration.

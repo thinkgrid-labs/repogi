@@ -58,9 +58,10 @@ Paired `both` sites follow the existing impact model's head-location convention.
 
 Default filename recognition is case sensitive:
 
-- `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx`.
-- Corresponding test/spec filenames with other extensions are recognized as
-  unsupported when semantic indexing is unavailable, including JavaScript tests.
+- `*.test.<ext>` and `*.spec.<ext>` for every indexed extension (`.ts`, `.tsx`,
+  `.mts`, `.cts`, and in source builds `.js`, `.jsx`, `.mjs`, `.cjs`).
+- Test/spec filenames with other module extensions (such as `.json`) are
+  recognized as unsupported.
 - Files in `__tests__/` are probable tests by directory convention.
 - Additional literal directories come from repeated `--test-dir` arguments or
   a package manifest's literal `directories.test`, relative to that manifest.
@@ -72,9 +73,9 @@ contain helpers, so runner membership remains unverified even with a static link
 
 | Per-snapshot class | Meaning |
 |---|---|
-| `supported_indexed` | Test/spec filename, indexed TypeScript/TSX without reported syntax/semantic extraction failure |
+| `supported_indexed` | Test/spec filename, indexed TypeScript or JavaScript without reported syntax/semantic extraction failure |
 | `possible_convention` | Indexed file identified through `__tests__` or an explicitly configured test directory |
-| `recognized_unindexed` | Recognized TypeScript test without usable semantic indexing, including ignored, oversized, symlinked or syntax-error files |
+| `recognized_unindexed` | Recognized test in an indexed language without usable semantic indexing, including ignored, oversized, symlinked or syntax-error files |
 | `unsupported_or_excluded` | Unsupported test extension or a built-in excluded path such as generated output |
 
 Inventory uses Git tree paths and the indexer's existing ignore/exclusion and

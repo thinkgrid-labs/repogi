@@ -99,7 +99,10 @@ impl Inspection {
             unchecked_files: unchecked,
             changed_files: changed,
             graph_freshness: "unverified_other_files_and_resolution".into(),
-            supported_extensions: vec![".ts".into(), ".tsx".into()],
+            supported_extensions: code_intel_core::language::SOURCE_EXTENSIONS
+                .iter()
+                .map(|extension| format!(".{extension}"))
+                .collect(),
         }
     }
 }

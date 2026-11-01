@@ -474,7 +474,7 @@ pub fn compare(request: &Request, options: &tests::Options) -> Result<Payload> {
             max_declarations: request.options.max_declarations,
             incoming_sites_per_node: 5_000,
             evidence_profile: "selected_static_proofs_v1",
-            languages: vec!["typescript", "tsx"],
+            languages: vec!["typescript", "tsx", "javascript", "jsx"],
             inventory_conventions: vec![
                 "test/spec filename conventions",
                 "__tests__ directories",

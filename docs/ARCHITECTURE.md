@@ -20,6 +20,23 @@ BLAKE3 hashes let explicit indexing skip unchanged parsing. Source edits trigger
 
 See [semantic scope](SEMANTICS.md), [module resolution](MODULE_RESOLUTION.md), [JSX](JSX_SEMANTICS.md), [CLI overview](../README.md) and [MCP API](MCP.md).
 
+## Languages
+
+```text
+discovery (ignore rules, exclusions, no-follow reads)
+  -> core::language::Language::of(path)        exact extension -> TypeScript | Tsx | JavaScript | Jsx
+  -> index::syntax (grammar per language)      TypeScript/TSX 0.23.2, JavaScript 0.23.1 (with JSX)
+  -> index::semantic (one syntax IR)           bindings, exports, uses; grammar differences handled here
+  -> store::semantic (one binder)              module lookup by the importer's language, then shared binding rules
+  -> SQLite graph + FTS5 -> context, references, impact, test discovery, investigation
+```
+
+`core::language` is the single source of truth for which extensions are indexed; discovery, freshness, navigation coverage, test discovery and impact categories all use it. The JavaScript grammar shares the TypeScript grammar's node names for JavaScript constructs, so the extractor and binder are shared. Where the grammars differ (parameter patterns, `class_heritage`), `index::semantic` handles both shapes. Module lookup is the only language-specific binder step: TypeScript importers follow TypeScript's candidate order, JavaScript importers a stricter profile that reports tool disagreements as ambiguous ([JavaScript importers](MODULE_RESOLUTION.md#javascript-importers)). The cached syntax IR version did not change: TypeScript output is identical, and earlier indexes simply gain JavaScript files on the next `repogi index`, with no schema migration.
+
+## Setup and diagnostics
+
+`cli::setup` implements `init`, `doctor` and `agent add` ([developer experience](DEVELOPER_EXPERIENCE.md)). They reuse the indexer's discovery (`index::inventory_paths`, which walks paths without reading contents), the store's read-only opens and state-path checks, and the memory store's read-only open. `doctor` never writes; `init` writes only `.code-intel/.gitignore`; `agent add --write` creates a client file only when none exists.
+
 ## Markdown project knowledge
 
 `core::knowledge` defines documents, sections, separate indexing counters and evidence hits. `index::markdown` uses CommonMark offsets to build disjoint sections with hierarchical headings. It shares ignore traversal, bounded text reads and BLAKE3 hashing with code indexing. A small `pulldown-cmark` dependency handles syntax boundaries instead of approximating Markdown with heading regular expressions.

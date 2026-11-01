@@ -1,27 +1,40 @@
 use anyhow::{Context, Result};
-use code_intel_core::{Edge, Fact, IndexedFile, Provenance, Signature, file_id};
+use code_intel_core::{
+    Edge, Fact, IndexedFile, Provenance, Signature, file_id, language::Language,
+};
 use tree_sitter::{Node, Parser};
 
-pub fn extract(path: &str, source: &str, hash: String) -> Result<IndexedFile> {
+/// The language of an indexed path. Callers only pass supported sources.
+fn language(path: &str) -> Language {
+    Language::of(path).unwrap_or(Language::TypeScript)
+}
+
+/// The bundled grammar for a language: TypeScript or TSX, and the JavaScript
+/// grammar (which includes JSX) for every JavaScript extension.
+fn grammar(language: Language) -> tree_sitter::Language {
+    match language {
+        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        Language::JavaScript | Language::Jsx => tree_sitter_javascript::LANGUAGE.into(),
+    }
+}
+
+fn parser(path: &str) -> Option<Parser> {
     let mut parser = Parser::new();
-    let tsx = std::path::Path::new(path)
-        .extension()
-        .is_some_and(|ext| ext == "tsx");
-    let language = if tsx {
-        tree_sitter_typescript::LANGUAGE_TSX
-    } else {
-        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-    };
-    parser
-        .set_language(&language.into())
-        .context("load bundled TypeScript grammar")?;
+    parser.set_language(&grammar(language(path))).ok()?;
+    Some(parser)
+}
+
+pub fn extract(path: &str, source: &str, hash: String) -> Result<IndexedFile> {
+    let language = language(path);
+    let mut parser = parser(path).context("load bundled Tree-sitter grammar")?;
     let tree = parser
         .parse(source, None)
         .context("Tree-sitter parsing was cancelled; retry indexing")?;
     let root = tree.root_node();
     let mut file = IndexedFile {
         path: path.into(),
-        language: if tsx { "tsx" } else { "typescript" }.into(),
+        language: language.name().into(),
         hash,
         size_bytes: u64::try_from(source.len())?,
         syntax_error: root.has_error(),
@@ -160,7 +173,12 @@ fn provenance(path: &str, node: Node<'_>) -> Provenance {
         source_path: path.into(),
         start_line: node.start_position().row + 1,
         end_line: end_line.max(node.start_position().row + 1),
-        extraction_method: "tree_sitter_typescript".into(),
+        extraction_method: if language(path).is_javascript() {
+            "tree_sitter_javascript"
+        } else {
+            "tree_sitter_typescript"
+        }
+        .into(),
         confidence: "syntax".into(),
     }
 }
@@ -254,16 +272,7 @@ fn module_edge(file: &mut IndexedFile, node: Node<'_>, source_id: &str, source: 
 #[must_use]
 pub fn variable_header(path: &str, declarator: &str) -> Option<String> {
     const PREFIX: &str = "const ";
-    let tsx = std::path::Path::new(path)
-        .extension()
-        .is_some_and(|ext| ext == "tsx");
-    let language = if tsx {
-        tree_sitter_typescript::LANGUAGE_TSX
-    } else {
-        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-    };
-    let mut parser = Parser::new();
-    parser.set_language(&language.into()).ok()?;
+    let mut parser = parser(path)?;
     let source = format!("{PREFIX}{declarator};");
     let tree = parser.parse(&source, None)?;
     let root = tree.root_node();
@@ -317,16 +326,7 @@ fn function_body(node: Node<'_>, depth: usize) -> Option<Node<'_>> {
 /// `None` when the file does not parse cleanly.
 #[must_use]
 pub fn module_residue(path: &str, text: &str) -> Option<Vec<String>> {
-    let tsx = std::path::Path::new(path)
-        .extension()
-        .is_some_and(|ext| ext == "tsx");
-    let language = if tsx {
-        tree_sitter_typescript::LANGUAGE_TSX
-    } else {
-        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-    };
-    let mut parser = Parser::new();
-    parser.set_language(&language.into()).ok()?;
+    let mut parser = parser(path)?;
     let tree = parser.parse(text, None)?;
     let root = tree.root_node();
     if root.has_error() {

@@ -227,6 +227,23 @@ fn bindings(node: Node<'_>, source: &str, file: &IndexedFile, module: &mut Modul
         };
         bind(name, visible, source, file, module, None);
     }
+    // JavaScript parameters are bare patterns inside `formal_parameters`;
+    // TypeScript wraps each one in `required_parameter`/`optional_parameter`.
+    if node.kind() == "formal_parameters" {
+        let mut cursor = node.walk();
+        for parameter in node.named_children(&mut cursor) {
+            if matches!(
+                parameter.kind(),
+                "identifier"
+                    | "assignment_pattern"
+                    | "object_pattern"
+                    | "array_pattern"
+                    | "rest_pattern"
+            ) {
+                bind(parameter, scope(node, true), source, file, module, None);
+            }
+        }
+    }
     // Single unparenthesized arrow parameter.
     if node.kind() == "arrow_function"
         && let Some(name) = node.child_by_field_name("parameter")
@@ -566,6 +583,19 @@ fn uses(node: Node<'_>, source: &str, file: &IndexedFile, module: &mut Module) {
     }
     if node.kind() == "extends_clause"
         && let Some(value) = node.child_by_field_name("value")
+    {
+        usage(node, value, Relationship::Extends, source, file, module);
+    }
+    // JavaScript's `class_heritage` holds the superclass expression directly
+    // (TypeScript nests it in `extends_clause`). Its identifiers are still
+    // visited below as references, exactly as for TypeScript.
+    if node.kind() == "class_heritage"
+        && let Some(value) = node.named_child(0).filter(|value| {
+            !matches!(
+                value.kind(),
+                "extends_clause" | "implements_clause" | "comment"
+            )
+        })
     {
         usage(node, value, Relationship::Extends, source, file, module);
     }
