@@ -39,6 +39,11 @@ def main(argv=None) -> int:
     plan.add_argument('--timeout-s', type=int, default=600)
     plan.add_argument('--max-budget-usd-per-session', type=float)
     plan.add_argument('--total-budget-usd', type=float)
+    plan.add_argument('--max-total-duration-s', type=int,
+                      help='stop starting sessions once another could end after this many seconds per invocation')
+    plan.add_argument('--draft', action='store_true',
+                      help='write a reviewable plan even if the agent executable or model is not pinned yet; '
+                           'draft plans can never be run')
     plan.add_argument('--output', type=Path, required=True)
 
     run = sub.add_parser('run')
@@ -48,6 +53,8 @@ def main(argv=None) -> int:
     run.add_argument('--retry-infrastructure', action='store_true',
                      help='re-run sessions whose latest attempt was an infrastructure failure')
     run.add_argument('--keep-workspaces', action='store_true')
+    # To stop a run: create <out>/STOP (no new session starts) or press Ctrl-C (the running
+    # agent is killed and its session is not recorded); re-running resumes.
 
     rep = sub.add_parser('report')
     rep.add_argument('--out', type=Path, required=True, help='directory holding plan.json and results.jsonl')
@@ -75,15 +82,21 @@ def main(argv=None) -> int:
             return 2
         adapter = adapters.make(args.adapter, Path(suite['_dir']), executable=args.agent_executable, model=args.model)
         problems = adapter.preflight()
-        if problems:
+        if problems and not args.draft:
             print('; '.join(problems), file=sys.stderr)
             return 2
         limits = {'timeout_s': args.timeout_s, 'max_budget_usd_per_session': args.max_budget_usd_per_session,
-                  'total_budget_usd': args.total_budget_usd}
+                  'total_budget_usd': args.total_budget_usd, 'max_total_duration_s': args.max_total_duration_s}
         built = runner.build_plan(suite, args.tasks, adapter, repogi=args.repogi.resolve(), repeats=args.repeats,
-                                  seed=args.seed, limits=limits, repogi_tools=args.repogi_tools)
+                                  seed=args.seed, limits=limits, repogi_tools=args.repogi_tools,
+                                  draft=problems if args.draft else None)
+        surface = built['repogi']['mcp_surface']
+        if 'error' in surface and adapter.live and not args.draft:
+            print(f"Repogi MCP server failed the planning handshake: {surface['error']}", file=sys.stderr)
+            return 2
         args.output.write_text(json.dumps(built, indent=2) + '\n')
-        print(f"plan {built['digest']} ({len(built['sessions'])} sessions) -> {args.output}")
+        kind = 'DRAFT plan (not runnable)' if built.get('draft') else 'plan'
+        print(f"{kind} {built['digest']} ({len(built['sessions'])} sessions) -> {args.output}")
         return 0
 
     if args.command == 'run':

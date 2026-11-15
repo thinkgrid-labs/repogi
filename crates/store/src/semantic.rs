@@ -3,15 +3,49 @@ use code_intel_core::{
     file_id,
     language::Language,
     semantic::{
-        Binding, Evidence, Location, Module, PathMapping, Project, Relationship, Resolution,
-        ResolutionContext, SemanticEdge, Symbol,
+        Binding, ClassInfo, CommonJsExport, Evidence, Location, Module, PathMapping, Project,
+        Relationship, Resolution, ResolutionContext, SemanticEdge, Symbol, Usage,
     },
 };
 use std::{
-    cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    cell::{OnceCell, RefCell},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::Path,
 };
+
+/// Bound on `extends` chains and subclass sets walked for one member lookup.
+const MAX_HIERARCHY: usize = 32;
+const MAX_SUBCLASSES: usize = 512;
+
+/// What a class's `extends` clause statically names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Super {
+    /// An indexed class (fact ID).
+    Known(String),
+    /// A package or global class: Repogi cannot see its members.
+    External,
+    /// A dynamic expression (`extends mixin(Base)`) or a binding that does not
+    /// resolve to a class: it may be any class, including an indexed one.
+    Unknown,
+}
+
+/// Whole-graph facts that decide whether an instance member lookup is safe.
+#[derive(Default)]
+struct Hierarchy {
+    supers: HashMap<String, Super>,
+    subclasses: HashMap<String, Vec<String>>,
+    /// Classes whose prototype may be modified (`C.prototype` used, prototype
+    /// manipulation in their module).
+    tainted: HashSet<String>,
+    /// Member names written on receivers that may be instances or constructors.
+    assigned: HashSet<String>,
+    /// `(class, member)` written through a binding of the class (`C.m = …`);
+    /// member `*` for computed writes.
+    static_writes: HashSet<(String, String)>,
+    /// Member names declared by classes whose superclass is `Unknown`: such a
+    /// class may override a method of any class.
+    unknown_overrides: HashSet<String>,
+}
 
 /// Directories the indexer never reads. A mapping into one cannot be checked,
 /// so it is reported as unsupported rather than treated as absent.
@@ -102,6 +136,8 @@ struct Resolver<'a> {
     children: HashMap<&'a str, Vec<&'a Symbol>>,
     /// Top-level export lookups, memoized for one rebind.
     exports: RefCell<HashMap<(String, String), Targets>>,
+    classes: HashMap<&'a str, &'a ClassInfo>,
+    hierarchy: OnceCell<Hierarchy>,
 }
 impl Resolver<'_> {
     fn module(&self, path: &str, name: &str) -> Targets {
@@ -638,8 +674,51 @@ impl Resolver<'_> {
                 ..Targets::default()
             };
         }
+        if let Some(member) = member
+            && binding
+                .mutated_members
+                .iter()
+                .any(|written| written == member || written == "*")
+        {
+            return Targets::failure(
+                Resolution::Unsupported,
+                "member_reassigned",
+                vec![format!("{path}: {}.{member} is written", binding.name)],
+            );
+        }
+        if binding.commonjs {
+            return self.require_binding(path, binding, member, seen, true);
+        }
         let mut result = if let Some(from) = binding.module.as_deref() {
             match self.module_path(path, from) {
+                Ok((target, steps))
+                    if Language::of(path).is_some_and(Language::is_javascript)
+                        && self.commonjs_module(&target) =>
+                {
+                    // Node.js and bundlers expose `module.exports` as the default
+                    // export and its statically detectable properties as names.
+                    let mut result = match binding.imported.as_str() {
+                        "" => Targets::target(file_id(&target)),
+                        "*" => member.map_or_else(
+                            || Targets::target(file_id(&target)),
+                            |member| self.commonjs_export(&target, member, seen),
+                        ),
+                        "default" => match member {
+                            None => self.commonjs_value(&target, seen),
+                            Some(member) => self.commonjs_export(&target, member, seen),
+                        },
+                        name => self.member(self.commonjs_export(&target, name, seen), member),
+                    };
+                    result.chain.extend(steps);
+                    result.chain.push(format!(
+                        "{path}: import {} from CommonJS module {target}",
+                        binding.imported
+                    ));
+                    if result.reason.is_none() {
+                        result.reason = Some((Resolution::Resolved, "esm_import_of_commonjs"));
+                    }
+                    result
+                }
                 Ok((target, steps)) => {
                     let mut result = if binding.imported == "*" {
                         if let Some(member) = member {
@@ -700,6 +779,18 @@ impl Resolver<'_> {
             .filter(|symbol| symbol.static_member && symbol.name.rsplit('.').next() == Some(member))
             .map(|symbol| symbol.id.clone())
             .collect();
+        if let Some(hierarchy) = self.hierarchy.get()
+            && (hierarchy
+                .static_writes
+                .contains(&(id.clone(), member.to_owned()))
+                || hierarchy.static_writes.contains(&(id.clone(), "*".into())))
+        {
+            return Targets::failure(
+                Resolution::Unsupported,
+                "member_reassigned",
+                vec![format!("{id}: static member {member} is written elsewhere")],
+            );
+        }
         result.ids = members;
         result.chain.push(format!("static member {member}"));
         result
@@ -830,6 +921,44 @@ impl Resolver<'_> {
         }
     }
 
+    /// EXPORTS edges for a `CommonJS` module's static export table.
+    fn commonjs_edges(&self, path: &str, module: &Module, edges: &mut Vec<SemanticEdge>) {
+        let Some(table) = module
+            .commonjs
+            .as_ref()
+            .filter(|_| self.commonjs_capable(path))
+        else {
+            return;
+        };
+        for export in &table.exports {
+            let name = if export.name.is_empty() {
+                "module.exports".to_owned()
+            } else {
+                export.name.clone()
+            };
+            let mut result = if table.dynamic.is_some() {
+                Targets::failure(
+                    Resolution::Unresolved,
+                    "dynamic_commonjs_exports",
+                    Vec::new(),
+                )
+            } else {
+                self.commonjs_entry(path, export, &mut BTreeSet::new())
+            };
+            if result.reason.is_none() {
+                result.reason = Some((Resolution::Resolved, "commonjs_export"));
+            }
+            edges.push(self.edge(
+                file_id(path),
+                name.clone(),
+                Relationship::Exports,
+                export.location.clone(),
+                result,
+                format!("CommonJS export {name}"),
+            ));
+        }
+    }
+
     /// A resolved JSX name must denote a value; a type declaration cannot be a
     /// rendered component. Resolved JSX sites carry their own rule.
     fn jsx_rule(&self, edge: &mut SemanticEdge) {
@@ -901,8 +1030,738 @@ impl Resolver<'_> {
                 syntax,
                 rule: rule.into(),
                 binding_chain: result.chain,
+                dispatch: None,
             },
         }
+    }
+}
+
+/// Instance dispatch and `CommonJS`.
+impl Resolver<'_> {
+    fn hierarchy(&self) -> &Hierarchy {
+        self.hierarchy.get_or_init(|| self.build_hierarchy())
+    }
+    fn is_class(&self, result: &Targets) -> Option<String> {
+        (result.status() == Resolution::Resolved)
+            .then(|| result.ids.first().cloned())
+            .flatten()
+            .filter(|id| self.symbol(id).is_some_and(|symbol| symbol.kind == "class"))
+    }
+    fn bound(module: &Module, name: &str, offset: usize) -> bool {
+        module.bindings.iter().any(|binding| {
+            binding.name == name && binding.scope_start <= offset && offset < binding.scope_end
+        })
+    }
+    /// Lookups here never ask for a member, so they cannot re-enter
+    /// [`Self::hierarchy`] through static-member checks.
+    #[allow(clippy::too_many_lines)] // One pass per fact family, kept together for review.
+    fn build_hierarchy(&self) -> Hierarchy {
+        let mut hierarchy = Hierarchy::default();
+        for (path, module) in self.modules {
+            let declared: Vec<&str> = module
+                .classes
+                .iter()
+                .map(|class| class.id.as_str())
+                .collect();
+            for usage in module.uses.iter().filter(|usage| {
+                usage.kind == Relationship::Extends
+                    && self.classes.contains_key(usage.source_id.as_str())
+            }) {
+                let result = self.local(
+                    path,
+                    &usage.name,
+                    usage.member.as_deref(),
+                    usage.location.start_byte,
+                    false,
+                    &mut BTreeSet::new(),
+                );
+                let parent = if let Some(id) = self.is_class(&result) {
+                    Super::Known(id)
+                } else if (usage.member.is_none()
+                    && usage
+                        .name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                    && !Self::bound(module, &usage.name, usage.location.start_byte))
+                    || matches!(result.reason, Some((_, "package_or_unmapped_specifier")))
+                {
+                    // A global (`Error`, `HTMLElement`) or a package import.
+                    Super::External
+                } else {
+                    Super::Unknown
+                };
+                hierarchy.supers.insert(usage.source_id.clone(), parent);
+            }
+            if module.prototype_opaque {
+                hierarchy
+                    .tainted
+                    .extend(declared.iter().map(|id| (*id).to_owned()));
+            }
+            for name in &module.prototype_uses {
+                if !Self::bound(module, &name.name, name.offset) {
+                    continue; // A global such as `Object.prototype`.
+                }
+                let result = self.local(
+                    path,
+                    &name.name,
+                    None,
+                    name.offset,
+                    false,
+                    &mut BTreeSet::new(),
+                );
+                if let Some(id) = self.is_class(&result) {
+                    hierarchy.tainted.insert(id);
+                } else if !(result.status() == Resolution::Resolved
+                    && result
+                        .ids
+                        .first()
+                        .and_then(|id| self.symbol(id))
+                        .is_some_and(|symbol| symbol.kind == "function"))
+                {
+                    // Possibly an alias of a class declared here.
+                    hierarchy
+                        .tainted
+                        .extend(declared.iter().map(|id| (*id).to_owned()));
+                }
+            }
+            for write in &module.member_writes {
+                let Some(property) = &write.property else {
+                    // A computed write on an arbitrary object is not tracked
+                    // (documented open-world limit), except through a class binding.
+                    if let Some(receiver) = &write.receiver
+                        && receiver != "this"
+                    {
+                        let result = self.local(
+                            path,
+                            receiver,
+                            None,
+                            write.offset,
+                            false,
+                            &mut BTreeSet::new(),
+                        );
+                        if let Some(id) = self.is_class(&result) {
+                            hierarchy.static_writes.insert((id, "*".into()));
+                        }
+                    }
+                    continue;
+                };
+                match write.receiver.as_deref() {
+                    Some("module" | "exports") => {}
+                    // `this.m = …` inside a class is an own field of that class.
+                    Some("this")
+                        if module
+                            .classes
+                            .iter()
+                            .filter_map(|class| self.symbol(&class.id).map(|_| class))
+                            .any(|class| Self::contains(&class.id, write.offset)) => {}
+                    Some(receiver) if receiver != "this" => {
+                        let result = self.local(
+                            path,
+                            receiver,
+                            None,
+                            write.offset,
+                            false,
+                            &mut BTreeSet::new(),
+                        );
+                        let target = result
+                            .ids
+                            .first()
+                            .filter(|_| result.status() == Resolution::Resolved);
+                        let kind = target
+                            .and_then(|id| self.symbol(id))
+                            .map(|symbol| symbol.kind.as_str());
+                        match (target, kind) {
+                            (Some(id), Some("class")) => {
+                                hierarchy
+                                    .static_writes
+                                    .insert((id.clone(), property.clone()));
+                            }
+                            // Properties of a function object or a module namespace.
+                            (Some(_), Some("function")) => {}
+                            (Some(id), None) if id.starts_with("file:") => {}
+                            _ => {
+                                hierarchy.assigned.insert(property.clone());
+                            }
+                        }
+                    }
+                    _ => {
+                        hierarchy.assigned.insert(property.clone());
+                    }
+                }
+            }
+        }
+        for (class, parent) in &hierarchy.supers {
+            match parent {
+                Super::Known(parent) => hierarchy
+                    .subclasses
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(class.clone()),
+                Super::Unknown => {
+                    for symbol in self.children.get(class.as_str()).into_iter().flatten() {
+                        if let Some(name) = symbol.name.rsplit('.').next() {
+                            hierarchy.unknown_overrides.insert(name.to_owned());
+                        }
+                    }
+                    if let Some(info) = self.classes.get(class.as_str()) {
+                        hierarchy.unknown_overrides.extend(
+                            info.instance_fields
+                                .iter()
+                                .chain(&info.static_fields)
+                                .cloned(),
+                        );
+                    }
+                }
+                Super::External => {}
+            }
+        }
+        for children in hierarchy.subclasses.values_mut() {
+            children.sort();
+        }
+        hierarchy
+    }
+    /// Does the class fact `id` span byte `offset` in its file?
+    fn contains(id: &str, offset: usize) -> bool {
+        // Fact IDs are `kind:path:start:end`.
+        let mut parts = id.rsplitn(3, ':');
+        let end = parts.next().and_then(|value| value.parse::<usize>().ok());
+        let start = parts.next().and_then(|value| value.parse::<usize>().ok());
+        matches!((start, end), (Some(start), Some(end)) if start <= offset && offset < end)
+    }
+    /// The methods `class` itself declares under `member`.
+    fn declared(&self, class: &str, member: &str, static_member: bool) -> Vec<&Symbol> {
+        self.children
+            .get(class)
+            .into_iter()
+            .flatten()
+            .filter(|symbol| {
+                symbol.kind == "method"
+                    && symbol.static_member == static_member
+                    && symbol.name.rsplit('.').next() == Some(member)
+            })
+            .copied()
+            .collect()
+    }
+    /// `this.m` / `super.m` inside a class member. The result is the declaration
+    /// the class hierarchy statically selects; it is withheld whenever an
+    /// indexed subclass overrides it, an own property may shadow it, the
+    /// prototype chain may be modified, or the hierarchy is not fully known.
+    #[allow(clippy::too_many_lines)] // Each early return is one documented safety rule.
+    fn instance_member(&self, path: &str, usage: &Usage) -> Targets {
+        let (Some(context), Some(member)) = (usage.context.as_ref(), usage.member.as_deref())
+        else {
+            return Targets::failure(
+                Resolution::Unresolved,
+                "receiver_not_bound_to_indexed_class",
+                Vec::new(),
+            );
+        };
+        let hierarchy = self.hierarchy();
+        let is_super = usage.name == "super";
+        let is_static = context.static_context;
+        let private = member.starts_with('#');
+        let mut chain = vec![format!(
+            "{path}: {} in {} member of {}",
+            usage.name,
+            if is_static { "static" } else { "instance" },
+            context.class
+        )];
+        let fail = |status, reason: &'static str, chain: Vec<String>| {
+            Targets::failure(status, reason, chain)
+        };
+        // Every class above the context class, bounded; a cycle (code that
+        // throws at class definition) never resolves.
+        let mut ancestors: Vec<String> = Vec::new();
+        let mut cursor = context.class.clone();
+        while let Some(Super::Known(parent)) = hierarchy.supers.get(&cursor) {
+            if ancestors.len() >= MAX_HIERARCHY
+                || ancestors.contains(parent)
+                || *parent == context.class
+            {
+                return fail(
+                    Resolution::Unsupported,
+                    "class_hierarchy_cyclic_or_too_deep",
+                    chain,
+                );
+            }
+            ancestors.push(parent.clone());
+            cursor = parent.clone();
+        }
+        let top = hierarchy.supers.get(&cursor).cloned();
+        // An own property named like the member (a field, `this.m = …`) on the
+        // context class or above shadows or replaces any prototype method.
+        if !is_super && !private {
+            for class in std::iter::once(&context.class).chain(&ancestors) {
+                let fields = self.classes.get(class.as_str()).map(|info| {
+                    if is_static {
+                        &info.static_fields
+                    } else {
+                        &info.instance_fields
+                    }
+                });
+                if fields.is_some_and(|fields| fields.iter().any(|field| field == member)) {
+                    chain.push(format!("{class}: own property {member}"));
+                    return fail(
+                        Resolution::Unsupported,
+                        "own_property_may_shadow_method",
+                        chain,
+                    );
+                }
+            }
+        }
+        let start = if is_super {
+            if hierarchy.tainted.contains(&context.class) {
+                return fail(Resolution::Unsupported, "prototype_may_be_modified", chain);
+            }
+            match hierarchy.supers.get(&context.class) {
+                Some(Super::Known(parent)) => {
+                    chain.push(format!("{}: extends {parent}", context.class));
+                    parent.clone()
+                }
+                Some(Super::External) => {
+                    return fail(
+                        Resolution::Unresolved,
+                        "inherited_from_unindexed_class",
+                        chain,
+                    );
+                }
+                Some(Super::Unknown) => {
+                    return fail(Resolution::Unsupported, "dynamic_superclass", chain);
+                }
+                None => return fail(Resolution::Unresolved, "no_superclass", chain),
+            }
+        } else {
+            context.class.clone()
+        };
+        // Walk up from `start` to the first class declaring the member.
+        let mut current = start;
+        let mut visited = HashSet::new();
+        let declared = loop {
+            if !visited.insert(current.clone()) || visited.len() > MAX_HIERARCHY {
+                return fail(
+                    Resolution::Unsupported,
+                    "class_hierarchy_cyclic_or_too_deep",
+                    chain,
+                );
+            }
+            if !private && hierarchy.tainted.contains(&current) {
+                return fail(Resolution::Unsupported, "prototype_may_be_modified", chain);
+            }
+            let info = self.classes.get(current.as_str());
+            if info.is_some_and(|info| info.dynamic_members) && (is_static || !is_super) {
+                return fail(Resolution::Unsupported, "dynamic_own_members", chain);
+            }
+            // Static fields are own properties of each constructor on the way.
+            if is_static && info.is_some_and(|info| info.static_fields.iter().any(|f| f == member))
+            {
+                return fail(
+                    Resolution::Unsupported,
+                    "own_property_may_shadow_method",
+                    chain,
+                );
+            }
+            let found = self.declared(&current, member, is_static);
+            if !found.is_empty() {
+                chain.push(format!("{current}: declares {member}"));
+                break found;
+            }
+            if private {
+                return fail(Resolution::Unresolved, "private_member_not_declared", chain);
+            }
+            match hierarchy.supers.get(&current) {
+                Some(Super::Known(parent)) => {
+                    chain.push(format!("{current}: no own {member}; extends {parent}"));
+                    current = parent.clone();
+                }
+                Some(Super::External) => {
+                    return fail(
+                        Resolution::Unresolved,
+                        "inherited_from_unindexed_class",
+                        chain,
+                    );
+                }
+                Some(Super::Unknown) => {
+                    return fail(Resolution::Unsupported, "dynamic_superclass", chain);
+                }
+                None => {
+                    return fail(
+                        Resolution::Unresolved,
+                        "member_not_declared_in_class_hierarchy",
+                        chain,
+                    );
+                }
+            }
+        };
+        let concrete: BTreeSet<String> = declared
+            .iter()
+            .filter(|symbol| !symbol.signature_only)
+            .map(|symbol| symbol.id.clone())
+            .collect();
+        let mut overrides = BTreeSet::new();
+        if !is_super && !private {
+            // `this` may be the context class or any subclass instance: every
+            // class above it and below it contributes own properties.
+            if top == Some(Super::Unknown) {
+                return fail(Resolution::Unsupported, "dynamic_superclass", chain);
+            }
+            let mut descendants = Vec::new();
+            let mut pending = vec![context.class.clone()];
+            while let Some(class) = pending.pop() {
+                for child in hierarchy.subclasses.get(&class).into_iter().flatten() {
+                    if descendants.contains(child) || *child == context.class {
+                        continue;
+                    }
+                    if descendants.len() >= MAX_SUBCLASSES {
+                        return fail(
+                            Resolution::Unsupported,
+                            "class_hierarchy_cyclic_or_too_deep",
+                            chain,
+                        );
+                    }
+                    descendants.push(child.clone());
+                    pending.push(child.clone());
+                }
+            }
+            for class in std::iter::once(&context.class)
+                .chain(&ancestors)
+                .chain(&descendants)
+            {
+                let Some(info) = self.classes.get(class.as_str()) else {
+                    continue;
+                };
+                let fields = if is_static {
+                    &info.static_fields
+                } else {
+                    &info.instance_fields
+                };
+                if info.dynamic_members {
+                    return fail(Resolution::Unsupported, "dynamic_own_members", chain);
+                }
+                if fields.iter().any(|field| field == member) {
+                    chain.push(format!("{class}: own property {member}"));
+                    return fail(
+                        Resolution::Unsupported,
+                        "own_property_may_shadow_method",
+                        chain,
+                    );
+                }
+            }
+            if descendants
+                .iter()
+                .any(|class| hierarchy.tainted.contains(class))
+            {
+                return fail(Resolution::Unsupported, "prototype_may_be_modified", chain);
+            }
+            if hierarchy.assigned.contains(member) {
+                chain.push(format!("{member} is assigned on an untracked receiver"));
+                return fail(Resolution::Unsupported, "member_assigned_elsewhere", chain);
+            }
+            if hierarchy.unknown_overrides.contains(member) {
+                return fail(
+                    Resolution::Unsupported,
+                    "possible_override_in_dynamic_subclass",
+                    chain,
+                );
+            }
+            for class in &descendants {
+                for symbol in self.declared(class, member, is_static) {
+                    if !symbol.signature_only {
+                        overrides.insert(symbol.id.clone());
+                    }
+                }
+            }
+        }
+        if !overrides.is_empty() {
+            chain.push(format!(
+                "{member} is overridden in {} subclass declaration(s)",
+                overrides.len()
+            ));
+            return Targets {
+                ids: concrete.into_iter().chain(overrides).collect(),
+                chain,
+                reason: Some((Resolution::Ambiguous, "overridden_in_subclass")),
+                ..Targets::default()
+            };
+        }
+        if concrete.is_empty() {
+            return fail(
+                Resolution::Unresolved,
+                "abstract_or_signature_only_member",
+                chain,
+            );
+        }
+        let ambiguous = concrete.len() > 1;
+        Targets {
+            ids: concrete,
+            chain,
+            reason: Some(if ambiguous {
+                (Resolution::Ambiguous, "multiple_static_targets")
+            } else if is_super {
+                (Resolution::Resolved, "super_member_static_declaration")
+            } else {
+                (Resolution::Resolved, "this_member_static_declaration")
+            }),
+            ..Targets::default()
+        }
+    }
+
+    /// The nearest `package.json` `type` at or above `path`'s directory.
+    fn package_type(&self, path: &str) -> Option<&str> {
+        let mut directory = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+        loop {
+            if let Some(kind) = self.resolution.package_types.get(directory) {
+                return Some(kind);
+            }
+            if directory.is_empty() {
+                return None;
+            }
+            directory = directory.rsplit_once('/').map_or("", |(dir, _)| dir);
+        }
+    }
+    /// Node.js would load `path` as `CommonJS`: `.cjs`, or `.js`/`.jsx` without
+    /// ES module syntax and not under `"type": "module"`. Never TypeScript or `.mjs`.
+    // Extensions match exactly and case-sensitively, as everywhere in indexing.
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    fn commonjs_capable(&self, path: &str) -> bool {
+        let Some(module) = self.modules.get(path) else {
+            return false;
+        };
+        if module.esm_syntax || !Language::of(path).is_some_and(Language::is_javascript) {
+            return false;
+        }
+        if path.ends_with(".cjs") {
+            return true;
+        }
+        !path.ends_with(".mjs") && matches!(self.package_type(path), None | Some("commonjs"))
+    }
+    fn commonjs_module(&self, path: &str) -> bool {
+        self.commonjs_capable(path) && self.modules[path].commonjs.is_some()
+    }
+    /// A `require` binding. With `lexical`, a plain use whose `require` cannot be
+    /// followed (package, unindexed, ES module target, not a `CommonJS` file)
+    /// still names its local declaration, as before `require` was modeled;
+    /// the IMPORTS edge (`lexical = false`) reports why the module was not followed.
+    fn require_binding(
+        &self,
+        path: &str,
+        binding: &Binding,
+        member: Option<&str>,
+        seen: &mut BTreeSet<(String, String)>,
+        lexical: bool,
+    ) -> Targets {
+        let specifier = binding.module.as_deref().unwrap_or_default();
+        let mut result = if self.commonjs_capable(path) {
+            match self.module_path(path, specifier) {
+                Err(failure) => failure,
+                Ok((target, steps)) if !self.commonjs_capable(&target) => Targets::failure(
+                    Resolution::Unsupported,
+                    "require_of_es_module_or_typescript",
+                    steps
+                        .into_iter()
+                        .chain([format!(
+                            "{path}: require({specifier}) => {target} is not CommonJS"
+                        )])
+                        .collect(),
+                ),
+                Ok((target, steps)) => {
+                    let mut result = if binding.imported == "*" {
+                        match member {
+                            None => self.commonjs_value(&target, seen),
+                            Some(member) => self.commonjs_export(&target, member, seen),
+                        }
+                    } else {
+                        self.member(
+                            self.commonjs_export(&target, &binding.imported, seen),
+                            member,
+                        )
+                    };
+                    result.chain.extend(steps);
+                    result
+                        .chain
+                        .push(format!("{path}: require({specifier}) => {target}"));
+                    result
+                }
+            }
+        } else {
+            Targets::failure(
+                Resolution::Unsupported,
+                "require_outside_commonjs_module",
+                vec![format!(
+                    "{path}: not loaded as CommonJS (ES module syntax or package type)"
+                )],
+            )
+        };
+        if lexical
+            && member.is_none()
+            && result.status() != Resolution::Resolved
+            && let Some(target) = &binding.target
+        {
+            let mut local = Targets::target(target.clone());
+            local.chain.push(format!(
+                "{path}: {} = require({specifier}) not followed; local declaration",
+                binding.name
+            ));
+            return local;
+        }
+        if result.reason.is_none() {
+            result.reason = Some((Resolution::Resolved, "commonjs_require_binding"));
+        }
+        result.chain.push(format!(
+            "{path}: {} = require({specifier}){}",
+            binding.name,
+            if binding.imported == "*" {
+                String::new()
+            } else {
+                format!(".{}", binding.imported)
+            }
+        ));
+        result
+    }
+    /// The `module.exports` value of a `CommonJS` module: its single assigned
+    /// value when that is known, else the module's exports object itself.
+    fn commonjs_value(&self, path: &str, seen: &mut BTreeSet<(String, String)>) -> Targets {
+        let table = self.modules[path].commonjs.as_ref();
+        match table.and_then(|table| table.exports.iter().find(|export| export.name.is_empty())) {
+            Some(_) if table.is_some_and(|table| table.dynamic.is_some()) => Targets::failure(
+                Resolution::Unresolved,
+                "dynamic_commonjs_exports",
+                Vec::new(),
+            ),
+            Some(export) => self.commonjs_entry(path, export, seen),
+            None => Targets::target(file_id(path)),
+        }
+    }
+    /// A named `CommonJS` export: an explicit `exports.name`, else a static member
+    /// of an assigned class value.
+    fn commonjs_export(
+        &self,
+        path: &str,
+        name: &str,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Targets {
+        let module = &self.modules[path];
+        if !module.complete {
+            return Targets {
+                uncertain: true,
+                ..Targets::default()
+            };
+        }
+        let Some(table) = module.commonjs.as_ref() else {
+            return Targets::failure(
+                Resolution::Unresolved,
+                "missing_commonjs_export",
+                Vec::new(),
+            );
+        };
+        if let Some(reason) = &table.dynamic {
+            return Targets::failure(
+                Resolution::Unresolved,
+                "dynamic_commonjs_exports",
+                vec![format!("{path}: exports are {reason}")],
+            );
+        }
+        if let Some(export) = table.exports.iter().find(|export| export.name == name) {
+            return self.commonjs_entry(path, export, seen);
+        }
+        if let Some(whole) = table.exports.iter().find(|export| export.name.is_empty()) {
+            if whole.module.is_some() && whole.member.is_none() {
+                // `module.exports = require("./other")` re-exports that module.
+                return self.commonjs_entry_member(path, whole, name, seen);
+            }
+            return self.member(self.commonjs_entry(path, whole, seen), Some(name));
+        }
+        Targets::failure(
+            Resolution::Unresolved,
+            "missing_commonjs_export",
+            vec![format!("{path}: no CommonJS export {name}")],
+        )
+    }
+    fn commonjs_entry_member(
+        &self,
+        path: &str,
+        export: &CommonJsExport,
+        name: &str,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Targets {
+        let key = (path.to_owned(), format!("commonjs:{name}"));
+        if seen.contains(&key) || seen.len() >= 64 {
+            return Targets::failure(
+                Resolution::Unsupported,
+                "commonjs_cycle_or_depth",
+                Vec::new(),
+            );
+        }
+        let specifier = export.module.as_deref().unwrap_or_default();
+        match self.module_path(path, specifier) {
+            Ok((target, steps)) if self.commonjs_capable(&target) => {
+                seen.insert(key.clone());
+                let mut result = self.commonjs_export(&target, name, seen);
+                seen.remove(&key);
+                result.chain.extend(steps);
+                result
+                    .chain
+                    .push(format!("{path}: module.exports = require({specifier})"));
+                result
+            }
+            Ok(_) => Targets::failure(
+                Resolution::Unsupported,
+                "require_of_es_module_or_typescript",
+                Vec::new(),
+            ),
+            Err(failure) => failure,
+        }
+    }
+    fn commonjs_entry(
+        &self,
+        path: &str,
+        export: &CommonJsExport,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Targets {
+        let label = if export.name.is_empty() {
+            "module.exports"
+        } else {
+            export.name.as_str()
+        };
+        let mut result = if let Some(local) = &export.local {
+            self.local(path, local, None, 0, true, seen)
+        } else if let Some(specifier) = &export.module {
+            let key = (path.to_owned(), format!("commonjs:{label}"));
+            if seen.contains(&key) || seen.len() >= 64 {
+                return Targets::failure(
+                    Resolution::Unsupported,
+                    "commonjs_cycle_or_depth",
+                    Vec::new(),
+                );
+            }
+            match self.module_path(path, specifier) {
+                Ok((target, steps)) if self.commonjs_capable(&target) => {
+                    seen.insert(key.clone());
+                    let mut result = match &export.member {
+                        Some(member) => self.commonjs_export(&target, member, seen),
+                        None => self.commonjs_value(&target, seen),
+                    };
+                    seen.remove(&key);
+                    result.chain.extend(steps);
+                    result
+                }
+                Ok(_) => Targets::failure(
+                    Resolution::Unsupported,
+                    "require_of_es_module_or_typescript",
+                    Vec::new(),
+                ),
+                Err(failure) => failure,
+            }
+        } else {
+            Targets::failure(
+                Resolution::Unresolved,
+                "commonjs_export_value_not_a_declaration",
+                Vec::new(),
+            )
+        };
+        result
+            .chain
+            .push(format!("{path}: CommonJS export {label}"));
+        result
     }
 }
 
@@ -927,12 +1786,22 @@ impl<'a> Resolver<'a> {
             symbols,
             children,
             exports: RefCell::new(HashMap::new()),
+            classes: modules
+                .values()
+                .flat_map(|module| &module.classes)
+                .map(|class| (class.id.as_str(), class))
+                .collect(),
+            hierarchy: OnceCell::new(),
         }
     }
 }
 
+#[allow(clippy::too_many_lines)] // The single ordered pass over every module.
 pub fn resolve(modules: &Modules, resolution: &ResolutionContext) -> Vec<SemanticEdge> {
     let resolver = Resolver::new(modules, resolution);
+    // Whole-graph write and inheritance facts first, so every member lookup
+    // below sees the same invalidation state.
+    resolver.hierarchy();
     let mut edges = Vec::new();
     // Enumerate all explicit export names to expand stars without inventing names.
     let names: BTreeSet<_> = modules
@@ -947,7 +1816,11 @@ pub fn resolve(modules: &Modules, resolution: &ResolutionContext) -> Vec<Semanti
             .iter()
             .filter(|binding| binding.module.is_some())
         {
-            let mut result = resolver.binding(path, binding, None, &mut BTreeSet::new());
+            let mut result = if binding.commonjs && !binding.mutated {
+                resolver.require_binding(path, binding, None, &mut BTreeSet::new(), false)
+            } else {
+                resolver.binding(path, binding, None, &mut BTreeSet::new())
+            };
             if binding.imported.is_empty() {
                 result = resolver.module(path, binding.module.as_deref().unwrap_or_default());
             }
@@ -966,15 +1839,22 @@ pub fn resolve(modules: &Modules, resolution: &ResolutionContext) -> Vec<Semanti
             ));
         }
         resolver.export_edges(path, module, &names, &mut edges);
+        resolver.commonjs_edges(path, module, &mut edges);
         for usage in &module.uses {
-            let mut result = resolver.local(
-                path,
-                &usage.name,
-                usage.member.as_deref(),
-                usage.location.start_byte,
-                false,
-                &mut BTreeSet::new(),
-            );
+            let instance =
+                matches!(usage.name.as_str(), "this" | "super") && usage.member.is_some();
+            let mut result = if instance {
+                resolver.instance_member(path, usage)
+            } else {
+                resolver.local(
+                    path,
+                    &usage.name,
+                    usage.member.as_deref(),
+                    usage.location.start_byte,
+                    false,
+                    &mut BTreeSet::new(),
+                )
+            };
             // Type-only imports cannot establish value calls, class inheritance or a
             // runtime JSX component.
             if (matches!(usage.kind, Relationship::Calls | Relationship::Extends) || usage.jsx)
@@ -1001,6 +1881,9 @@ pub fn resolve(modules: &Modules, resolution: &ResolutionContext) -> Vec<Semanti
             );
             if usage.jsx {
                 resolver.jsx_rule(&mut edge);
+            }
+            if instance && edge.status == Resolution::Resolved {
+                edge.evidence.dispatch = Some("static_declaration".into());
             }
             edges.push(edge);
         }

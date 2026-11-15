@@ -7,8 +7,10 @@ print mode and parses its stream-json events; it is the only live adapter.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -32,6 +34,8 @@ class Session:
     allowed_tools: list[str]
     limits: dict
     raw_log: Path
+    # Absolute paths the agent must never read or edit (harness, graders, other sessions' results).
+    deny_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +51,8 @@ class Transcript:
     search_calls: int | None = None
     agent: dict = field(default_factory=dict)     # reported model and version
     mcp_connected: bool | None = None
+    mcp_servers: dict | None = None               # name -> status from the init event; None if no init event
+    tool_inputs: list[str] = field(default_factory=list)   # serialized tool_use inputs, for leak detection
 
 
 class Adapter:
@@ -109,6 +115,15 @@ class ClaudeCode(Adapter):
         self.model = model
         self.permission_mode = permission_mode
 
+    def resolved(self) -> Path | None:
+        found = shutil.which(self.executable) or self.executable
+        path = Path(found)
+        return path.resolve() if path.is_file() else None
+
+    def executable_sha256(self) -> str | None:
+        path = self.resolved()
+        return hashlib.sha256(path.read_bytes()).hexdigest() if path else None
+
     def version(self) -> str | None:
         try:
             out = subprocess.run([self.executable, '--version'], capture_output=True, text=True, timeout=30)
@@ -118,7 +133,8 @@ class ClaudeCode(Adapter):
 
     def describe(self) -> dict:
         return {'name': self.name, 'live': True, 'executable': self.executable,
-                'version': self.version(), 'model': self.model, 'permission_mode': self.permission_mode}
+                'executable_sha256': self.executable_sha256(), 'version': self.version(), 'model': self.model,
+                'permission_mode': self.permission_mode}
 
     def preflight(self) -> list[str]:
         problems = []
@@ -138,6 +154,7 @@ class ClaudeCode(Adapter):
             '--strict-mcp-config', '--mcp-config', str(mcp_path),
             '--permission-mode', self.permission_mode,
             '--allowedTools', ','.join(session.allowed_tools),
+            '--disallowedTools', ','.join(disallowed_tools(session.deny_paths)),
         ]
         if session.limits.get('max_budget_usd_per_session'):
             command += ['--max-budget-usd', str(session.limits['max_budget_usd_per_session'])]
@@ -161,6 +178,11 @@ class ClaudeCode(Adapter):
                 os.killpg(process.pid, signal.SIGKILL)
                 _, stderr = process.communicate()
                 timed_out = True
+            except BaseException:
+                # Ctrl-C or any harness error: the agent runs in its own session and would
+                # otherwise keep running (and spending) after the harness exits.
+                kill_group(process)
+                raise
         transcript = parse_stream(session.raw_log.read_text().splitlines())
         if timed_out:
             transcript.stop_reason = 'timeout'
@@ -168,6 +190,40 @@ class ClaudeCode(Adapter):
             transcript.stop_reason = 'agent_error'
             transcript.error = (stderr or '')[-2000:]
         return transcript
+
+
+def kill_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+    if process.stderr:
+        process.stderr.close()
+
+
+# Identical in both conditions: no web access (the Repogi repository, hidden tests
+# included, is public) and no reads or edits of the harness, graders or results.
+NO_NETWORK_TOOLS = ('WebFetch', 'WebSearch')
+
+
+def disallowed_tools(deny_paths: list[str]) -> list[str]:
+    rules = list(NO_NETWORK_TOOLS)
+    for path in deny_paths:
+        absolute = '/' + str(path).lstrip('/')     # Claude Code: `//abs/path` is an absolute path rule
+        rules += [f'Read(/{absolute}/**)', f'Edit(/{absolute}/**)']
+    return rules
+
+
+LEAK_MARKERS = ('.grader', 'agent_outcomes', 'tasks/hidden', 'tasks/reference')
+
+
+def forbidden_access(tool_inputs: list[str], deny_paths: list[str]) -> list[str]:
+    """Tool inputs that name grader material or a denied path (best effort; see docs)."""
+    patterns = [re.escape(m) for m in LEAK_MARKERS]
+    patterns += [re.escape(str(p).rstrip('/')) + r'(?![\w.-])' for p in deny_paths]
+    regex = re.compile('|'.join(patterns))
+    return sorted({hit.group(0) for text in tool_inputs for hit in regex.finditer(text)})
 
 
 STOP_REASONS = {
@@ -194,6 +250,7 @@ def parse_stream(lines: list[str]) -> Transcript:
                                 'tools': event.get('tools')}
             servers = {s.get('name'): s.get('status') for s in event.get('mcp_servers') or []}
             transcript.mcp_connected = servers.get('repogi') == 'connected' if 'repogi' in servers else None
+            transcript.mcp_servers = servers
         elif kind == 'assistant':
             message = event.get('message') or {}
             if message.get('id'):
@@ -202,6 +259,7 @@ def parse_stream(lines: list[str]) -> Transcript:
                 if item.get('type') == 'tool_use':
                     name = item.get('name', '?')
                     tools[name] = tools.get(name, 0) + 1
+                    transcript.tool_inputs.append(json.dumps(item.get('input'), sort_keys=True))
                     if name == 'Read' and isinstance(item.get('input'), dict):
                         read.append(item['input'].get('file_path', ''))
         elif kind == 'result':

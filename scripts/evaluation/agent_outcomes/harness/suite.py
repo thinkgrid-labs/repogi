@@ -94,6 +94,7 @@ def digest(suite: dict) -> dict:
         'suite_json': hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest(),
         'fixture_tree': tree_digest(Path(suite['_fixture'])),
         'hidden_tree': tree_digest(base / 'hidden'),
+        'reference_tree': tree_digest(base / 'reference'),
         'harness_sources': harness_digest(),
     }
 

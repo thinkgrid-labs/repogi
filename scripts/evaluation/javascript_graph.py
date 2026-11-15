@@ -12,7 +12,11 @@ is asked for the definition at:
   * every resolved Repogi edge located in a JavaScript-family file
     (precision: does TypeScript agree on the target declaration?), and
   * every unresolved or unsupported CALLS site in those files
-    (recall: would TypeScript have resolved it to a declaration in the corpus?).
+    (recall: would TypeScript have resolved it to a declaration in the corpus?), and
+  * every resolved instance-member edge (`this.m`, `super.m`, evidence
+    `dispatch`): TypeScript's implementation search must find no in-corpus
+    implementation other than the claimed declaration (no override a runtime
+    dispatch could select).
 
 TypeScript is an oracle, not ground truth: disagreements are listed for review.
 """
@@ -69,11 +73,19 @@ for (const site of sites) {
   const file = path.join(root, site.path);
   let definitions = [];
   try { definitions = service.getDefinitionAtPosition(file, toUtf16(file, site.byte)) || []; } catch (e) { definitions = []; }
-  out.push({ key: site.key, definitions: definitions.map((d) => {
+  const where = (d) => {
     const inside = d.fileName.startsWith(root + path.sep);
     return inside ? { path: path.relative(root, d.fileName).split(path.sep).join('/'), byte: toByte(d.fileName, d.textSpan.start), kind: d.kind }
                   : { external: true, kind: d.kind };
-  }) });
+  };
+  const answer = { key: site.key, definitions: definitions.map(where) };
+  if (site.implementations) {
+    // Overriding implementations a runtime dispatch could select instead.
+    let implementations = [];
+    try { implementations = service.getImplementationAtPosition(file, toUtf16(file, site.byte)) || []; } catch (e) { implementations = []; }
+    answer.implementations = implementations.map(where);
+  }
+  out.push(answer);
 }
 fs.writeFileSync(sitesFile + '.out', JSON.stringify(out));
 """
@@ -150,6 +162,8 @@ def main():
                 continue
             site = {'key': i, 'path': e['location']['path'], 'byte': site_byte(e)}
             if e['status'] == 'resolved' and e['target_id'] and not e['target_id'].startswith('file:'):
+                if e['evidence'].get('dispatch'):
+                    site['implementations'] = True
                 precision_sites.append(site)
             elif e['status'] != 'resolved' and e['kind'] == 'CALLS' and NAME_CHAIN.fullmatch(e['evidence']['syntax']):
                 # Only static names (`f`, `a.b`, `this.m`); a callee that is
@@ -163,7 +177,21 @@ def main():
         subprocess.run(['node', str(oracle_file), str(root), str(sites_file), str(args.typescript.resolve())],
                        check=True, timeout=3600, cwd=tmp)
         oracle_s = time.monotonic() - started
-        answers = {a['key']: a['definitions'] for a in json.loads(Path(str(sites_file) + '.out').read_text())}
+        raw_answers = json.loads(Path(str(sites_file) + '.out').read_text())
+        answers = {a['key']: a['definitions'] for a in raw_answers}
+        implementations = {a['key']: a['implementations'] for a in raw_answers if 'implementations' in a}
+        # Instance-member edges claim a static declaration. TypeScript's
+        # implementation search names every in-corpus override a runtime
+        # dispatch could select; more than the claimed one is a dispatch conflict.
+        dispatch_single, dispatch_conflicts = 0, []
+        for key, found in implementations.items():
+            e = js_edges[key]
+            path, start, end = parse_id(e['target_id'])
+            others = [d for d in found if not d.get('external') and not (d['path'] == path and start <= d['byte'] < end)]
+            if others:
+                dispatch_conflicts.append((e, others))
+            else:
+                dispatch_single += 1
         agreed, disagree, no_answer, external = set(), [], 0, 0
         for site in precision_sites:
             e = js_edges[site['key']]
@@ -218,6 +246,12 @@ def main():
                              'missed_by_rule': reasons,
                              'estimated_recall': round(resolved_calls_agree / (resolved_calls_agree + len(missed)), 4)
                              if resolved_calls_agree + len(missed) else None},
+            'instance_dispatch': {'checked': len(implementations), 'no_other_implementation': dispatch_single,
+                                  'other_implementations': len(dispatch_conflicts),
+                                  'conflicts_for_review': [
+                                      {'site': f"{e['location']['path']}:{e['location']['start_line']}",
+                                       'syntax': e['evidence']['syntax'][:80], 'repogi': e['target_id'], 'typescript': o[:4]}
+                                      for e, o in dispatch_conflicts[:args.max_review]]},
             'disagreements_for_review': [
                 {'site': f"{e['location']['path']}:{e['location']['start_line']}", 'kind': e['kind'],
                  'syntax': e['evidence']['syntax'][:80], 'repogi': e['target_id'], 'typescript': defs}
@@ -229,7 +263,7 @@ def main():
     text = json.dumps(result, indent=2, ensure_ascii=False)
     if args.output:
         args.output.write_text(text + '\n')
-    print(json.dumps({k: result[k] for k in ('files', 'timing_s', 'index_bytes', 'precision', 'recall_calls')}, indent=1))
+    print(json.dumps({k: result[k] for k in ('files', 'timing_s', 'index_bytes', 'precision', 'recall_calls', 'instance_dispatch')}, indent=1))
 
 
 if __name__ == '__main__':

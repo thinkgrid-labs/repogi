@@ -11,6 +11,7 @@ from collections import Counter
 
 from . import CONDITIONS, OUTCOMES
 
+UNGRADED = ('infrastructure_failure', 'indeterminate')
 METRICS = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens',
            'model_calls', 'tool_calls', 'cost_usd')
 
@@ -56,7 +57,8 @@ def summarize(plan: dict, records: list[dict]) -> dict:
     for condition in CONDITIONS:
         rows = [r for r in runs if r['condition'] == condition]
         counts = Counter(r['outcome'] for r in rows)
-        gradable = sum(counts[o] for o in OUTCOMES if o != 'infrastructure_failure')
+        # Infrastructure failures and indeterminate gradings are not evidence either way.
+        gradable = sum(counts[o] for o in OUTCOMES if o not in UNGRADED)
         telemetry = {}
         for metric in METRICS:
             values = [(r.get('telemetry') or {}).get(metric) for r in rows]
@@ -66,9 +68,13 @@ def summarize(plan: dict, records: list[dict]) -> dict:
         conditions[condition] = {
             'sessions': len(rows),
             'outcomes': {o: counts.get(o, 0) for o in OUTCOMES},
+            'graded_sessions': gradable,
             'success_rate': round(counts['passed'] / gradable, 3) if gradable else None,
             'success_rate_wilson95': wilson(counts['passed'], gradable),
             'elapsed_s': distribution([r['elapsed_s'] for r in rows if r.get('elapsed_s') is not None]),
+            # Agent wall clock plus the cold index the Repogi condition needs before the agent starts.
+            'end_to_end_s': distribution([round(r['elapsed_s'] + (r.get('indexing') or {}).get('cold_s', 0), 3)
+                                          for r in rows if r.get('elapsed_s') is not None]),
             'telemetry': telemetry,
             'tool_use': {
                 'repogi_calls': distribution([r['repogi_calls'] for r in rows if r.get('repogi_calls') is not None]),
@@ -77,13 +83,15 @@ def summarize(plan: dict, records: list[dict]) -> dict:
             },
         }
     indexing = [r['indexing'] for r in runs if r.get('indexing')]
-    pairs = paired(runs)
+    pairs = paired(runs, planned)
     return {
         'schema': 'repogi-agent-outcomes-summary/1',
         'plan_digest': plan['digest'],
         'suite': plan['suite'],
         'adapter': plan['adapter'],
         'repogi': plan['repogi'],
+        'source': plan.get('source'),
+        'grader_environment': plan.get('grader_environment'),
         'modes': modes,
         'live_agent_measurement': modes == ['live'],
         'planned_sessions': len(planned),
@@ -101,14 +109,26 @@ def summarize(plan: dict, records: list[dict]) -> dict:
     }
 
 
-def paired(runs: list[dict]) -> dict:
-    blocks = {}
+def block_of(key: str) -> tuple[str, int]:
+    task, repeat, _ = key.rsplit('#', 2)
+    return task, int(repeat.removeprefix('r'))
+
+
+def paired(runs: list[dict], planned: set[str] | None = None) -> dict:
+    """Classify every planned (task, repeat) block. A pair counts only when both sessions
+    were graded; the rest are counted by reason, never dropped silently."""
+    blocks = {block_of(k): {} for k in planned or ()}
     for r in runs:
         blocks.setdefault((r['task'], r['repeat']), {})[r['condition']] = r
     counts = Counter()
     cost_ratios = []
     for block in blocks.values():
-        if set(block) != set(CONDITIONS) or any(r['outcome'] == 'infrastructure_failure' for r in block.values()):
+        outcomes = {r['outcome'] for r in block.values()}
+        reason = ('not_run' if set(block) != set(CONDITIONS) else
+                  'excluded_infrastructure' if 'infrastructure_failure' in outcomes else
+                  'excluded_indeterminate' if 'indeterminate' in outcomes else None)
+        if reason:
+            counts[reason] += 1
             counts['excluded'] += 1
             continue
         base, repo = (block[c]['outcome'] == 'passed' for c in CONDITIONS)
@@ -119,7 +139,8 @@ def paired(runs: list[dict]) -> dict:
             cost_ratios.append(round(costs[1] / costs[0], 4))
     return {
         'blocks': len(blocks),
-        **{k: counts.get(k, 0) for k in ('both_passed', 'both_failed', 'baseline_only', 'repogi_only', 'excluded')},
+        **{k: counts.get(k, 0) for k in ('both_passed', 'both_failed', 'baseline_only', 'repogi_only', 'excluded',
+                                         'not_run', 'excluded_infrastructure', 'excluded_indeterminate')},
         'sign_test_p': sign_test(counts['repogi_only'], counts['baseline_only']),
         'cost_ratio_repogi_over_baseline': distribution(cost_ratios),
     }
@@ -146,6 +167,12 @@ def limitations(modes, runs, pairs) -> list[str]:
                      'the Wilson intervals and sign test show the uncertainty.')
     if any(r['outcome'] == 'infrastructure_failure' for r in runs):
         notes.append('Infrastructure failures are excluded from success rates and paired comparisons.')
+    if any(r['outcome'] == 'indeterminate' for r in runs):
+        notes.append('Indeterminate sessions (grader error or attempted access to grader material) are excluded '
+                     'from success rates and paired comparisons.')
+    if pairs.get('not_run'):
+        notes.append(f"{pairs['not_run']} planned blocks are incomplete (a session was not run); the run stopped "
+                     'early or is still in progress.')
     if any(r.get('telemetry_source', '').startswith('claude-code') for r in runs):
         notes.append('Token counts and cost are what Claude Code reports; with subscription (OAuth) auth the '
                      'cost is a list-price estimate, not billing.')
@@ -164,7 +191,8 @@ def markdown(summary: dict) -> str:
         f"- Adapter: `{adapter['name']}`" + (f" {adapter.get('version')}, model `{adapter.get('model')}`"
                                               if adapter.get('live') else ''),
         f"- Repogi binary sha256 `{summary['repogi']['sha256'][:16]}…`, tools `{summary['repogi']['tools']}`",
-        f"- Plan digest `{summary['plan_digest']}`",
+        f"- Plan digest `{summary['plan_digest']}`; source commit `{(summary.get('source') or {}).get('commit')}`; "
+        f"grader Node.js `{(summary.get('grader_environment') or {}).get('node')}`",
         f"- Sessions recorded: {summary['recorded_sessions']} of {summary['planned_sessions']}",
         '', '## Outcomes', '',
         '| Condition | Passed | Failed | Incomplete | Infra | Indeterminate | Success (95% CI) |',
@@ -179,15 +207,17 @@ def markdown(summary: dict) -> str:
                      + (f'{rate:.2f} [{ci[0]:.2f}, {ci[1]:.2f}]' if rate is not None else 'n/a') + ' |')
     p = summary['paired']
     lines += ['', f"Paired blocks: {p['blocks']} (both passed {p['both_passed']}, both failed {p['both_failed']}, "
-              f"baseline only {p['baseline_only']}, Repogi only {p['repogi_only']}, excluded {p['excluded']}); "
+              f"baseline only {p['baseline_only']}, Repogi only {p['repogi_only']}, excluded {p['excluded']}: "
+              f"not run {p['not_run']}, infrastructure {p['excluded_infrastructure']}, "
+              f"indeterminate {p['excluded_indeterminate']}); "
               f"sign test p = {p['sign_test_p'] if p['sign_test_p'] is not None else 'n/a'}.", '',
               '## Efficiency (medians; only sessions with reported telemetry)', '',
               '| Metric | Baseline | Repogi | Missing (B/R) |', '| --- | ---: | ---: | --- |']
-    for metric in METRICS + ('elapsed_s',):
+    for metric in METRICS + ('elapsed_s', 'end_to_end_s'):
         cells, missing = [], []
         for condition in summary['conditions'].values():
-            if metric == 'elapsed_s':
-                d, miss = condition['elapsed_s'], 0
+            if metric in ('elapsed_s', 'end_to_end_s'):
+                d, miss = condition[metric], 0
             else:
                 t = condition['telemetry'][metric]
                 d, miss = t['distribution'], t['missing_sessions']
@@ -197,7 +227,8 @@ def markdown(summary: dict) -> str:
     idx = summary['indexing']
     if idx['cold_s']:
         lines += ['', f"Indexing (Repogi condition, outside agent time): cold median {idx['cold_s']['median']} s, "
-                  f"warm median {idx['warm_s']['median']} s, index size median {idx['index_bytes']['median']} bytes."]
+                  f"warm median {idx['warm_s']['median']} s, index size median {idx['index_bytes']['median']} bytes. "
+                  'end_to_end_s adds each Repogi session\'s cold index to its agent time.']
     lines += ['', '## Per task', '', '| Task | Category | Baseline | Repogi |', '| --- | --- | --- | --- |']
     for row in summary['tasks']:
         lines.append(f"| {row['task']} | {row['category']} | {', '.join(row['baseline'])} | {', '.join(row['repogi'])} |")

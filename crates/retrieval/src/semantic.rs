@@ -122,7 +122,14 @@ pub fn dependencies(
                             "typescript_static_binder_v1"
                         }
                         .into(),
-                        confidence: "verified_static".into(),
+                        // Instance-member edges name the statically selected
+                        // declaration, not a proven runtime callee.
+                        confidence: if edge.evidence.dispatch.is_some() {
+                            "static_declaration"
+                        } else {
+                            "verified_static"
+                        }
+                        .into(),
                     },
                     resolution: Some(edge.status),
                     evidence: Some(edge.evidence),

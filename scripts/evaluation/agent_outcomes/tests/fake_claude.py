@@ -3,7 +3,10 @@
 
 Behaviour comes from FAKE_CLAUDE_MODE: `fix` edits src/money/format.js like the
 reference solution, `sleep` hangs (timeout test), `crash` exits non-zero
-without a result event. It records its argv to FAKE_CLAUDE_ARGV.
+without a result event, `nocost` fixes but reports no cost, `nomcp` reports no
+MCP servers, `extramcp` reports an extra server, `peek` also reads a hidden
+test. FAKE_CLAUDE_MODEL overrides the reported model. It records its argv to
+FAKE_CLAUDE_ARGV.
 """
 import json
 import os
@@ -19,8 +22,13 @@ Path(os.environ['FAKE_CLAUDE_ARGV']).write_text(json.dumps(sys.argv[1:]))
 mode = os.environ.get('FAKE_CLAUDE_MODE', 'fix')
 mcp = json.loads(Path(sys.argv[sys.argv.index('--mcp-config') + 1]).read_text())
 servers = [{'name': name, 'status': 'connected'} for name in mcp['mcpServers']]
+if mode == 'nomcp':
+    servers = []
+if mode == 'extramcp':
+    servers.append({'name': 'user-server', 'status': 'connected'})
 emit = lambda event: print(json.dumps(event), flush=True)  # noqa: E731
-emit({'type': 'system', 'subtype': 'init', 'model': 'fake-model', 'claude_code_version': '0.0.0-fake',
+emit({'type': 'system', 'subtype': 'init', 'model': os.environ.get('FAKE_CLAUDE_MODEL', 'fake-model'),
+      'claude_code_version': '0.0.0-fake',
       'tools': ['Read', 'Edit'], 'mcp_servers': servers})
 if mode == 'sleep':
     time.sleep(60)
@@ -29,6 +37,9 @@ if mode == 'crash':
 emit({'type': 'assistant', 'message': {'id': 'm1', 'content': [
     {'type': 'tool_use', 'name': 'Read', 'input': {'file_path': 'src/money/format.js'}},
     {'type': 'tool_use', 'name': 'Grep', 'input': {'pattern': 'formatPrice'}}]}})
+if mode == 'peek':
+    emit({'type': 'assistant', 'message': {'id': 'p1', 'content': [{'type': 'tool_use', 'name': 'Read', 'input': {
+        'file_path': os.environ['FAKE_CLAUDE_PEEK']}}]}})
 if mcp['mcpServers']:
     emit({'type': 'assistant', 'message': {'id': 'm2', 'content': [
         {'type': 'tool_use', 'name': 'mcp__repogi__atlas_context', 'input': {'task': 'price format'}}]}})
@@ -41,6 +52,6 @@ target.write_text(text.replace(
     "  const fraction = String(Math.abs(cents % 100)).padStart(2, '0');\n  return `${sign}${symbol}${whole}.${fraction}`;"))
 emit({'type': 'assistant', 'message': {'id': 'm3', 'content': [{'type': 'text', 'text': 'Fixed.'}]}})
 emit({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Fixed the sign.', 'num_turns': 3,
-      'duration_ms': 1200, 'total_cost_usd': 0.0123,
+      'duration_ms': 1200, 'total_cost_usd': None if mode == 'nocost' else 0.0123,
       'usage': {'input_tokens': 100, 'output_tokens': 50, 'cache_creation_input_tokens': 10,
                 'cache_read_input_tokens': 2000}})
