@@ -46,7 +46,8 @@ class SuiteValidation(unittest.TestCase):
 
     def test_digest_tracks_harness_and_grader_sources(self):
         digest = suites.digest(SUITE)
-        self.assertEqual(set(digest), {'suite_json', 'fixture_tree', 'hidden_tree', 'harness_sources'})
+        self.assertEqual(set(digest), {'suite_json', 'fixture_tree', 'hidden_tree', 'reference_tree',
+                                       'harness_sources'})
 
 
 class Graders(unittest.TestCase):
@@ -247,6 +248,246 @@ class Runs(unittest.TestCase):
         other = self.plan(mock, tasks=('feature-discount',), conditions=['baseline'])
         with self.assertRaisesRegex(runner.PlanError, 'different plan'):
             runner.run(other, SUITE, mock, out, log=lambda _: None)
+
+
+def _record(tid, condition, outcome, cost=None, **extra):
+    return {'key': f'{tid}#r1#{condition}', 'task': tid, 'repeat': 1, 'condition': condition,
+            'category': 'bug_fix', 'outcome': outcome, 'mode': 'live', 'telemetry': {'cost_usd': cost},
+            'elapsed_s': 1.0, **extra}
+
+
+class PairedAccounting(unittest.TestCase):
+    def test_indeterminate_is_excluded_not_counted_as_failure(self):
+        records = [_record('a', 'baseline', 'passed'), _record('a', 'repogi', 'indeterminate'),
+                   _record('b', 'baseline', 'failed'), _record('b', 'repogi', 'passed')]
+        plan = {'digest': 'x', 'suite': {}, 'adapter': {}, 'repogi': {}, 'sessions': [{'key': r['key']} for r in records]}
+        summary = report.summarize(plan, records)
+        self.assertEqual(summary['paired']['excluded_indeterminate'], 1)
+        self.assertEqual(summary['paired']['baseline_only'], 0)
+        self.assertEqual(summary['paired']['repogi_only'], 1)
+        self.assertEqual(summary['conditions']['repogi']['graded_sessions'], 1)
+        self.assertEqual(summary['conditions']['repogi']['success_rate'], 1.0)
+        self.assertEqual(summary['conditions']['repogi']['outcomes']['indeterminate'], 1)
+
+    def test_unrun_planned_blocks_are_counted(self):
+        records = [_record('a', 'baseline', 'passed'), _record('a', 'repogi', 'passed'), _record('b', 'baseline', 'failed')]
+        keys = [r['key'] for r in records] + ['b#r1#repogi', 'c#r1#baseline', 'c#r1#repogi']
+        plan = {'digest': 'x', 'suite': {'id': 's', 'fixture_tree': 'f'}, 'adapter': {'name': 'claude-code'},
+                'repogi': {'sha256': 'r', 'tools': 't'}, 'sessions': [{'key': k} for k in keys]}
+        paired = report.summarize(plan, records)['paired']
+        self.assertEqual((paired['blocks'], paired['not_run'], paired['both_passed']), (3, 2, 1))
+        self.assertIn('not run 2', report.markdown(report.summarize(plan, records)))
+
+    def test_end_to_end_time_includes_cold_index(self):
+        records = [_record('a', 'baseline', 'passed'),
+                   _record('a', 'repogi', 'passed', indexing={'cold_s': 2.5, 'warm_s': 0.5, 'index_bytes': 10})]
+        plan = {'digest': 'x', 'suite': {}, 'adapter': {}, 'repogi': {}, 'sessions': [{'key': r['key']} for r in records]}
+        summary = report.summarize(plan, records)
+        self.assertEqual(summary['conditions']['repogi']['end_to_end_s']['median'], 3.5)
+        self.assertEqual(summary['conditions']['repogi']['elapsed_s']['median'], 1.0)
+        self.assertEqual(summary['conditions']['baseline']['end_to_end_s']['median'], 1.0)
+        self.assertEqual(summary['indexing']['warm_s']['median'], 0.5)
+
+
+class Planning(unittest.TestCase):
+    def test_order_is_counterbalanced_per_task_and_overall(self):
+        mock = adapters.MockNoop()
+        binary = Path(sys.executable)
+        plan = runner.build_plan(SUITE, None, mock, repogi=binary, repeats=2, seed=7, limits={})
+        first = {(s['task'], s['repeat']): s['condition'] for s in plan['sessions'] if s['position'] == 0}
+        for t in SUITE['tasks']:
+            self.assertEqual({first[(t['id'], 1)], first[(t['id'], 2)]}, set(runner.CONDITIONS), t['id'])
+        single = runner.build_plan(SUITE, None, mock, repogi=binary, repeats=1, seed=7, limits={})
+        leading = [s['condition'] for s in single['sessions'] if s['position'] == 0]
+        self.assertEqual(leading.count('baseline'), leading.count('repogi'))
+
+    def test_plan_records_provenance_inputs(self):
+        plan = runner.build_plan(SUITE, None, adapters.MockNoop(), repogi=Path(sys.executable), repeats=1, seed=1,
+                                 limits={})
+        self.assertIn('commit', plan['source'])
+        self.assertIn('node', plan['grader_environment'])
+        self.assertIn('reference_tree', plan['suite'])
+        self.assertIn('error', plan['repogi']['mcp_surface'], 'python is not a Repogi MCP server')
+        self.assertIn('WebFetch', plan['disallowed_tools']['both_conditions'])
+
+
+@unittest.skipUnless(NODE, 'node is required to grade')
+class Hardening(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.env = mock.patch.dict(os.environ, {'FAKE_CLAUDE_ARGV': str(self.tmp / 'argv.json'),
+                                                'FAKE_CLAUDE_MODE': 'fix'})
+        self.env.start()
+        self.argv = self.tmp / 'argv.json'
+        self.binary = Path(REPOGI).resolve() if REPOGI else Path(sys.executable)
+
+    def tearDown(self):
+        self.env.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def fake(self):
+        return adapters.ClaudeCode(str(FAKE), 'fake-model')
+
+    def plan(self, adapter, tasks=('bugfix-negative-price',), conditions=('baseline',), binary=None, **limits):
+        limits = {'timeout_s': 60, 'total_budget_usd': 1.0, **limits}
+        plan = runner.build_plan(SUITE, list(tasks), adapter, repogi=binary or self.binary, repeats=1, seed=1,
+                                 limits=limits)
+        plan['sessions'] = [s for s in plan['sessions'] if s['condition'] in conditions]
+        plan['digest'] = runner.plan_digest(plan)
+        return plan
+
+    def go(self, plan, adapter=None, out='out', **kwargs):
+        adapter = adapter or self.fake()
+        authorize = plan['digest'] if adapter.live else None
+        runner.run(plan, SUITE, adapter, self.tmp / out, authorize_live=authorize, log=lambda _: None, **kwargs)
+        return runner.load_results(self.tmp / out / 'results.jsonl')
+
+    def test_authorization_covers_every_plan_input(self):
+        plan = self.plan(self.fake())
+        mutations = {
+            'model': lambda p: p['adapter'].__setitem__('model', 'other-model'),
+            'agent version': lambda p: p['adapter'].__setitem__('version', '9.9.9'),
+            'agent executable': lambda p: p['adapter'].__setitem__('executable_sha256', '0' * 64),
+            'repogi binary': lambda p: p['repogi'].__setitem__('sha256', '0' * 64),
+            'repogi tools': lambda p: p['repogi'].__setitem__('tools', 'atlas_context'),
+            'task set': lambda p: p.__setitem__('sessions', p['sessions'][:0]),
+            'repetitions': lambda p: p.__setitem__('repeats', 5),
+            'session budget': lambda p: p['limits'].__setitem__('max_budget_usd_per_session', 9.0),
+            'total budget': lambda p: p['limits'].__setitem__('total_budget_usd', 99.0),
+            'timeout': lambda p: p['limits'].__setitem__('timeout_s', 3600),
+            'allowed tools': lambda p: p['allowed_tools'].append('Bash'),
+            'grader node': lambda p: p['grader_environment'].__setitem__('node', 'v0.0.0'),
+            **{f'suite {key}': (lambda key: lambda p: p['suite'].__setitem__(key, '0' * 64))(key)
+               for key in suites.digest(SUITE)},
+        }
+        for name, mutate in mutations.items():
+            edited = copy.deepcopy(plan)
+            mutate(edited)
+            self.assertNotEqual(runner.plan_digest(edited), plan['digest'], name)
+            for redigest in (False, True):
+                if redigest:
+                    edited['digest'] = runner.plan_digest(edited)
+                with self.assertRaises(runner.PlanError, msg=name):
+                    runner.run(edited, SUITE, self.fake(), self.tmp / 'refused', authorize_live=plan['digest'],
+                               log=lambda _: None)
+        self.assertFalse(self.argv.exists(), 'no mutated plan may start the agent')
+
+    def test_draft_plans_never_run(self):
+        plan = runner.build_plan(SUITE, ['bugfix-negative-price'], adapters.MockNoop(), repogi=self.binary,
+                                 repeats=1, seed=1, limits={}, draft=['agent version'])
+        with self.assertRaisesRegex(runner.PlanError, 'draft'):
+            runner.run(plan, SUITE, adapters.MockNoop(), self.tmp / 'out', log=lambda _: None)
+
+    def test_unknown_cost_is_charged_its_cap_and_never_reported(self):
+        os.environ['FAKE_CLAUDE_MODE'] = 'nocost'
+        plan = self.plan(self.fake(), tasks=('bugfix-negative-price', 'feature-discount'),
+                         max_budget_usd_per_session=0.5, total_budget_usd=0.9)
+        records = self.go(plan)
+        self.assertEqual(len(records), 1, 'the second session could push spend past the total')
+        self.assertIsNone(records[0]['telemetry']['cost_usd'])
+        self.assertEqual(runner.budget_charge(records[0], 0.5), 0.5)
+
+    def test_budget_reserves_one_session_cap(self):
+        plan = self.plan(self.fake(), tasks=('bugfix-negative-price', 'feature-discount'),
+                         max_budget_usd_per_session=0.5, total_budget_usd=1.0)
+        self.assertEqual(len(self.go(plan)), 2)
+        self.argv.unlink()
+        plan = self.plan(self.fake(), tasks=('bugfix-negative-price', 'feature-discount'),
+                         max_budget_usd_per_session=0.5, total_budget_usd=0.4)
+        self.assertEqual(self.go(plan, out='tight'), [])
+        self.assertFalse(self.argv.exists(), 'a cap larger than the total budget starts nothing')
+
+    def test_stop_file_and_duration_limit(self):
+        plan = self.plan(adapters.MockNoop())
+        (self.tmp / 'out').mkdir()
+        (self.tmp / 'out' / 'STOP').write_text('')
+        self.assertEqual(self.go(plan, adapters.MockNoop()), [])
+        (self.tmp / 'out' / 'STOP').unlink()
+        self.assertEqual(len(self.go(plan, adapters.MockNoop())), 1)
+        short = self.plan(adapters.MockNoop(), max_total_duration_s=1)
+        self.assertEqual(self.go(short, adapters.MockNoop(), out='short'), [])
+
+    def test_reported_model_mismatch_is_infrastructure_and_halts(self):
+        os.environ['FAKE_CLAUDE_MODEL'] = 'some-other-model'
+        plan = self.plan(self.fake(), tasks=('bugfix-negative-price', 'feature-discount'))
+        records = self.go(plan)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['outcome'], 'infrastructure_failure')
+        self.assertIn('some-other-model', records[0]['halt'])
+
+    def test_baseline_with_mcp_servers_is_not_a_baseline(self):
+        os.environ['FAKE_CLAUDE_MODE'] = 'extramcp'
+        record = self.go(self.plan(self.fake()))[0]
+        self.assertEqual(record['outcome'], 'infrastructure_failure')
+        self.assertIn('user-server', record['error'])
+
+    @unittest.skipUnless(REPOGI, 'set REPOGI_BINARY or build target/release/repogi')
+    def test_repogi_session_without_a_connected_server_is_not_graded(self):
+        os.environ['FAKE_CLAUDE_MODE'] = 'nomcp'
+        record = self.go(self.plan(self.fake(), conditions=('repogi',)))[0]
+        self.assertEqual(record['outcome'], 'infrastructure_failure')
+        self.assertNotIn('grading', record)
+        self.assertNotIn('halt', record)
+
+    def test_agent_is_denied_web_and_harness_and_peeking_is_indeterminate(self):
+        os.environ['FAKE_CLAUDE_MODE'] = 'peek'
+        os.environ['FAKE_CLAUDE_PEEK'] = str(HERE.parent / 'tasks/hidden/bugfix-negative-price/format.test.mjs')
+        record = self.go(self.plan(self.fake()))[0]
+        self.assertEqual(record['outcome'], 'indeterminate')
+        self.assertTrue(record['contamination'])
+        argv = json.loads(self.argv.read_text())
+        denied = argv[argv.index('--disallowedTools') + 1].split(',')
+        for rule in ('WebFetch', 'WebSearch', f'Read(/{runner.ROOT}/**)', f'Edit(/{runner.ROOT}/**)',
+                     f'Read(/{(self.tmp / "out").resolve()}/**)'):
+            self.assertIn(rule, denied)
+        self.assertTrue(denied[2].startswith('Read(//'), 'absolute-path rules use the // form')
+
+    def test_live_runs_refuse_workspaces_inside_denied_trees(self):
+        plan = self.plan(self.fake())
+        with mock.patch.object(runner.tempfile, 'gettempdir', return_value=str(runner.ROOT / 'tmp')):
+            with self.assertRaisesRegex(runner.PlanError, 'TMPDIR'):
+                runner.run(plan, SUITE, self.fake(), self.tmp / 'out', authorize_live=plan['digest'],
+                           log=lambda _: None)
+
+    def test_results_carry_provenance(self):
+        plan = self.plan(self.fake())
+        record = self.go(plan)[0]
+        prov = record['provenance']
+        self.assertEqual(prov['repogi_sha256'], plan['repogi']['sha256'])
+        self.assertEqual(prov['agent']['model'], 'fake-model')
+        self.assertEqual(prov['agent']['executable_sha256'], runner.file_sha256(FAKE))
+        self.assertEqual(prov['agent']['version'], '0.0.0-fake (Claude Code)')
+        self.assertEqual(prov['source_commit'], plan['source']['commit'])
+        self.assertEqual(prov['grader_node'], plan['grader_environment']['node'])
+        self.assertEqual(len(prov['suite_digest']), 64)
+
+    def test_kept_workspaces_leave_the_shared_temp_directory(self):
+        records = self.go(self.plan(adapters.MockReference(Path(SUITE['_dir']))),
+                          adapters.MockReference(Path(SUITE['_dir'])), keep_workspaces=True)
+        kept = Path(records[0]['workspace'])
+        self.assertTrue(kept.is_relative_to((self.tmp / 'out').resolve()))
+        self.assertTrue((kept / '.grader').is_dir())
+
+    def test_interrupt_kills_the_agent_process_group(self):
+        os.environ['FAKE_CLAUDE_MODE'] = 'sleep'
+        workspace = ws.create(Path(SUITE['_fixture']))
+        self.addCleanup(ws.remove, workspace)
+        session = adapters.Session(task('bugfix-negative-price'), 'baseline', workspace, 'p', {'mcpServers': {}},
+                                   [], {'timeout_s': 60}, self.tmp / 'raw.jsonl')
+        with mock.patch.object(adapters.subprocess.Popen, 'communicate', side_effect=KeyboardInterrupt), \
+                mock.patch.object(adapters.os, 'killpg', wraps=os.killpg) as killpg:
+            with self.assertRaises(KeyboardInterrupt):
+                self.fake().run(session)
+        killpg.assert_called_once()
+
+    def test_index_without_json_report_is_infrastructure(self):
+        script = self.tmp / 'not-repogi.sh'
+        script.write_text('#!/bin/sh\necho not json\n')
+        script.chmod(0o755)
+        mock_ref = adapters.MockReference(Path(SUITE['_dir']))
+        record = self.go(self.plan(mock_ref, conditions=('repogi',), binary=script), mock_ref)[0]
+        self.assertEqual(record['outcome'], 'infrastructure_failure')
+        self.assertIn('no JSON', record['error'])
 
 
 if __name__ == '__main__':
