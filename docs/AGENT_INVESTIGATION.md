@@ -53,7 +53,7 @@ Evidence classes are reported separately and are never folded into one confidenc
 | Class | Meaning | Does **not** mean |
 | --- | --- | --- |
 | `explicit_selector` | The caller named this exact indexed identity. | That it is relevant to the task. |
-| `verified_static_relationship` | A resolved typed TypeScript edge in the indexed snapshot. | That a change breaks the consumer, or runtime behavior. |
+| `verified_static_relationship` | A resolved static edge in the indexed snapshot. Its detail names the binder rule; `this_member_static_declaration`/`super_member_static_declaration` name the declaration the class hierarchy statically selects ([accuracy](STATIC_ANALYSIS_ACCURACY.md)). | That a change breaks the consumer, or runtime behavior; for instance members, the runtime callee. |
 | `validated_knowledge_reference` | An explicit document claim whose target identity validated in the index. | That the code implements the requirement correctly. |
 | `recorded_intent` | An author-declared requirement or ADR, with its source range. | That the code matches it. |
 | `advisory_test_candidate` | A resolved static consumer located in a test-convention file. | That the test runs, passes or covers the behavior. |

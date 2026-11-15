@@ -1,6 +1,6 @@
 //! Evidence-backed static bindings. Separate from the frozen heuristic graph.
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Location {
@@ -36,6 +36,11 @@ pub struct Evidence {
     pub syntax: String,
     pub rule: String,
     pub binding_chain: Vec<String>,
+    /// Set on instance-member edges (`this.m`, `super.m`): `static_declaration`
+    /// means the target is the declaration the class hierarchy statically
+    /// selects, not a proof of the runtime callee. Absent on every other edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -53,7 +58,9 @@ pub struct SemanticEdge {
 /// something new, so files whose cached IR predates it are reparsed once
 /// instead of silently missing the new facts. 2: JSX component references, and
 /// object-pattern default values read as expressions instead of bindings.
-pub const SEMANTIC_IR_VERSION: u32 = 2;
+/// 3: class member context for `this`/`super`, `CommonJS` `require` bindings and
+/// export tables, member-level (instead of whole-binding) write invalidation.
+pub const SEMANTIC_IR_VERSION: u32 = 3;
 
 /// Cached syntax IR, not claims of resolved bindings. Scope ranges are half-open bytes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -63,9 +70,99 @@ pub struct Module {
     pub exports: Vec<Export>,
     pub uses: Vec<Usage>,
     pub symbols: Vec<Symbol>,
+    /// Top-level classes with facts, and what may shadow their methods.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<ClassInfo>,
+    /// Writes through a member (`x.m = v`, `x[k] = v`, `x.m++`), outside
+    /// `this.m` writes inside classes (recorded on [`ClassInfo`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub member_writes: Vec<MemberWrite>,
+    /// Identifiers whose `.prototype` is used anywhere (read or write).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prototype_uses: Vec<NameAt>,
+    /// `__proto__`, `setPrototypeOf` or `.prototype` on a non-identifier: the
+    /// prototype chains of this module's classes cannot be trusted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prototype_opaque: bool,
+    /// `import`/`export` statements are present (ES module syntax).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub esm_syntax: bool,
+    /// Static `CommonJS` exports, when the file writes `module.exports`/`exports`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commonjs: Option<CommonJs>,
+}
+
+/// A top-level class declaration (by fact ID) and its own property names.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClassInfo {
+    pub id: String,
+    /// Instance fields (`m = …`, `m;`) and `this.m` writes anywhere in the body:
+    /// own properties that shadow prototype methods.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instance_fields: Vec<String>,
+    /// Static fields: own properties of the constructor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub static_fields: Vec<String>,
+    /// `this[k] = …`, `Object.assign(this, …)`, `Object.defineProperty(this, …)`
+    /// or similar: any member name may be an own property.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dynamic_members: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberWrite {
+    /// The identifier the written member hangs off (`x` in `x.a.b = v`);
+    /// `None` for any other receiver (calls, `this.a.b`, literals).
+    pub receiver: Option<String>,
+    /// The written property name; `None` when computed.
+    pub property: Option<String>,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NameAt {
+    pub name: String,
+    pub offset: usize,
+}
+
+/// The lexical class context of a `this.m`/`super.m` use: the nearest
+/// non-arrow function is a method of this class.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemberContext {
+    /// Class fact ID.
+    pub class: String,
+    /// The method is `static`: `this` is the constructor, `super` its parent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub static_context: bool,
+}
+
+/// Static `CommonJS` exports: only unconditional top-level assignments.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommonJs {
+    pub exports: Vec<CommonJsExport>,
+    /// Why the table cannot be trusted (conditional, computed or aliased
+    /// writes, `Object.defineProperty`, shadowed `module`/`exports`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommonJsExport {
+    /// The export name; `""` is the `module.exports` value itself.
+    pub name: String,
+    /// A local binding holding the value, when it is a plain identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<String>,
+    /// `require("spec")` (optionally `.member`) holding the value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<String>,
+    pub location: Location,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)] // Serialized IR shape; flags are independent.
 pub struct Binding {
     pub name: String,
     pub target: Option<String>,
@@ -77,6 +174,14 @@ pub struct Binding {
     pub mutated: bool,
     pub type_only: bool,
     pub location: Location,
+    /// Members written through this binding (`x.m = v`: `m`; `x[k] = v`: `*`).
+    /// They invalidate member uses (`x.m()`), not the binding itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mutated_members: Vec<String>,
+    /// A `require("…")` binding: `module` is the literal specifier and
+    /// `imported` is `*` (the whole `module.exports`) or a property name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub commonjs: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +205,9 @@ pub struct Usage {
     /// never a confirmed call.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub jsx: bool,
+    /// For `this.m`/`super.m`: the enclosing class method, when supported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<MemberContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +218,10 @@ pub struct Symbol {
     pub parent: Option<String>,
     pub static_member: bool,
     pub callable: bool,
+    /// A body-less member (abstract method, overload signature): never a
+    /// runtime target of instance dispatch.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signature_only: bool,
 }
 
 /// Project module-resolution settings, read from `tsconfig.json`/`jsconfig.json`
@@ -123,6 +235,10 @@ pub struct ResolutionContext {
     /// Non-indexed files a TypeScript resolver could select before an indexed one
     /// (JavaScript, `.mts`/`.cts`/`.d.mts`/`.d.cts`, `package.json`).
     pub other_files: BTreeSet<String>,
+    /// `package.json` `type` per directory that has one: `module`, `commonjs`
+    /// (also when the field is absent) or `invalid` (unreadable or not a string).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub package_types: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

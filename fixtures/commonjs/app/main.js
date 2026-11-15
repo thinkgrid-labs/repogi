@@ -1,0 +1,27 @@
+const session = require('../lib/session');
+const { validate, renew: again, Token } = require('../lib/session.js');
+const { a, b, c } = require('../lib/named');
+const reset = require('../lib/reset');
+const cond = require('../lib/conditional');
+const assigned = require('../lib/assign');
+const re = require('../lib/reexport');
+const main = require('../lib/value');
+const esm = require('../lib/esm.mjs');
+const pkg = require('lodash');
+const name = './dynamic-name';
+const dyn = require(name);
+const { validate: v = () => false } = require('../lib/session');
+const issue = require('../lib/session').Token;
+const { f } = require('../lib/flag.cjs');
+
+session.validate(); session.renew(); session.missing();
+validate(); again(); Token.issue();
+a(); b(); c();
+reset.x(); reset.y(); reset.z();
+cond.a(); assigned.a(); re.a(); main();
+esm.e(); pkg.map(); dyn.run(); v();
+issue.issue(); f();
+let later = require('../lib/named');
+later = {};
+later.a();
+module.exports = { pkg, esm };

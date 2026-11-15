@@ -25,6 +25,7 @@ const MODULE_EXTENSIONS: [&str; 8] = ["ts", "tsx", "js", "jsx", "mjs", "cjs", "m
 pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext, Vec<Diagnostic>) {
     let mut configs: BTreeMap<String, String> = BTreeMap::new();
     let mut module_files = BTreeSet::new();
+    let mut package_types = BTreeMap::new();
     for entry in entries {
         if entry.file_type().is_some_and(|kind| kind.is_dir()) {
             continue;
@@ -45,9 +46,12 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
             .to_owned();
         if name == "tsconfig.json" || (name == "jsconfig.json" && !configs.contains_key(&directory))
         {
-            configs.insert(directory, relative.clone());
+            configs.insert(directory.clone(), relative.clone());
         }
         let extension = Path::new(name).extension().and_then(|value| value.to_str());
+        if name == "package.json" {
+            package_types.insert(directory.clone(), package_type(root, &relative));
+        }
         if name == "package.json" || extension.is_some_and(|ext| MODULE_EXTENSIONS.contains(&ext)) {
             module_files.insert(relative);
         }
@@ -73,6 +77,7 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
         ResolutionContext {
             projects,
             other_files: module_files,
+            package_types,
         },
         diagnostics,
     )
@@ -306,6 +311,25 @@ fn merge(options: &mut Options, inherited: Options) {
     if !matches!(inherited.paths, Setting::Unset) {
         options.paths = inherited.paths;
     }
+}
+
+/// The Node.js module type a `package.json` declares for `.js` files below it:
+/// `commonjs` when `type` is absent, `invalid` when it cannot be read.
+fn package_type(root: &Path, relative: &str) -> String {
+    let parsed = read(root, relative).ok().and_then(|text| {
+        serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text)).ok()
+    });
+    match parsed
+        .as_ref()
+        .and_then(Value::as_object)
+        .map(|object| object.get("type"))
+    {
+        Some(None) => "commonjs",
+        Some(Some(Value::String(kind))) if kind == "module" => "module",
+        Some(Some(Value::String(kind))) if kind == "commonjs" => "commonjs",
+        _ => "invalid",
+    }
+    .into()
 }
 
 /// A regular, non-symlinked config file inside the root, within the size cap.

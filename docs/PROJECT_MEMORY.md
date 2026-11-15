@@ -81,7 +81,7 @@ Evidence is named explicitly and resolved to one exact indexed identity. Several
 | --- | --- | --- | --- |
 | `--evidence REQ-…` / `ADR-…` / entity ID | Requirement, decision, document or section | `recorded_intent` | yes |
 | `--evidence knowledge-edge:<id>` (validated) | An explicit document claim with a validated target | `validated_knowledge_reference` | yes |
-| `--edge <source-fact-id> <target-fact-id>` | A resolved CALLS/REFERENCES/EXTENDS edge | `verified_static_relationship` | yes |
+| `--edge <source-fact-id> <target-fact-id>` | A resolved CALLS/REFERENCES/EXTENDS edge (an instance-member edge names a static declaration, not the runtime callee) | `verified_static_relationship` | yes |
 | `--source <path>` | An indexed Markdown document | `recorded_intent` | yes |
 | `--evidence <fact-id>`, `--source <code path>` | A declaration or file | `indexed_code_location` | context only |
 | `--evidence knowledge-edge:<id>` (not validated) | An unresolved, ambiguous, invalid or stale claim | `unresolved_reference` / `stale_reference` | context only |

@@ -272,7 +272,7 @@ Most commands only read. `repogi init` writes only `.code-intel/.gitignore`, `re
 | Area | Current scope |
 | --- | --- |
 | **Languages** | TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`) and, in source builds, JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`). Python, Rust and other languages are not indexed. A query with no matches says that other languages were not searched. |
-| **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. Package imports, `package.json` `exports`, instance dispatch (`this.method()`), CommonJS `require`/`module.exports` and dynamic `import()` stay unconfirmed. |
+| **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. Static `require`/`module.exports` and `this.m()`/`super.m()` resolve in source builds when no override, shadowing or dynamic write can redirect them ([accuracy](docs/STATIC_ANALYSIS_ACCURACY.md)). Package imports, `package.json` `exports`, dynamic CommonJS, overridden instance methods and dynamic `import()` stay unconfirmed. |
 | **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps ([details](docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md)); the JavaScript grammar (0.23.1) does not parse Flow annotations, so such files are indexed as partial. |
 | **Project knowledge** | Markdown only, with local lexical section search. Documents record intent and do not prove code behavior. |
 | **Project memory** | Explicitly proposed and reviewed claims only. Verification checks cited bytes and identities, not truth. Search is lexical. Reviewer names are self-reported labels, not authenticated identities, and export digests are integrity checks, not signatures. Back up with `repogi memory export`. |

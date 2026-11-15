@@ -211,17 +211,29 @@ fn interrupted_builds_are_never_used_and_stale_ones_are_removed() {
     impact(root, &[]);
     let trees_dir = root.join(".code-intel/impact/trees");
     let tree = "a".repeat(40);
-    let stale = trees_dir.join(format!(".tmp-{tree}-ir2-0000000000000000-1-1"));
-    let recent = trees_dir.join(format!(".tmp-{tree}-ir2-0000000000000000-2-2"));
-    for dir in [&stale, &recent] {
+    let ir = code_intel_core::semantic::SEMANTIC_IR_VERSION;
+    let stale = trees_dir.join(format!(".tmp-{tree}-ir{ir}-0000000000000000-1-1"));
+    // Left by an older IR version: still this cache's, so still removed.
+    let upgraded = trees_dir.join(format!(".tmp-{tree}-ir2-0000000000000000-3-3"));
+    let recent = trees_dir.join(format!(".tmp-{tree}-ir{ir}-0000000000000000-2-2"));
+    // Not this cache's naming scheme: never touched.
+    let foreign = trees_dir.join(format!(".tmp-{tree}-irx-0000000000000000-4-4"));
+    for dir in [&stale, &upgraded, &recent, &foreign] {
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("index.db"), b"half written").unwrap();
     }
     let old = SystemTime::now() - Duration::from_secs(7200);
-    fs::File::open(&stale).unwrap().set_modified(old).unwrap();
+    for dir in [&stale, &upgraded, &foreign] {
+        fs::File::open(dir).unwrap().set_modified(old).unwrap();
+    }
     let report = impact(root, &[]);
     assert_eq!(report["base"]["index"], "cache");
     assert!(!stale.exists(), "stale interrupted build kept");
+    assert!(!upgraded.exists(), "interrupted build of an older IR kept");
+    assert!(
+        foreign.exists(),
+        "a directory outside the naming scheme was removed"
+    );
     assert!(recent.exists(), "a possibly running build was removed");
 }
 

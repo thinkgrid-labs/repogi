@@ -44,7 +44,8 @@ TypeScript's candidate order is one tool's choice. For a file in `.js`, `.jsx`, 
 | Without an extension (`./a`) | Files first: `a.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`. Exactly one must exist; two or more (for example `a.js` beside `a.ts` or `a.mjs`) are **ambiguous**. Only when no file exists, the directory: `a/package.json` is **unsupported** (its `main`/`exports` are not modeled), otherwise exactly one `a/index.*`. |
 | JSON (`./data.json`, or `./data` with only `data.json`) | Not tracked; **unresolved**. |
 | Bare (`react`, `@scope/pkg`) | `jsconfig`/`tsconfig` `paths` and `baseUrl` as above, then **unsupported** (`package_or_unmapped_specifier`). |
-| `require('./a')`, `import('./a')` | Not import bindings. The call stays **unresolved** (no binding named `require`/`import`). |
+| `require('./a')` | In a CommonJS file (`.cjs`, or `.js`/`.jsx` without ES module syntax and not under `"type": "module"`), a literal specifier binds like an import, with the same lookup ([CommonJS](STATIC_ANALYSIS_ACCURACY.md#commonjs)). The `require(...)` call itself stays **unresolved**. |
+| `import('./a')` | Not an import binding. The call stays **unresolved** (no binding named `import`). |
 
 These are static claims about which file a specifier names. They say nothing about whether the module loads at runtime under a particular tool.
 

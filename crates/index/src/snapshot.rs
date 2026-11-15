@@ -356,8 +356,15 @@ impl Cache {
                 continue;
             }
             if let Some(rest) = name.strip_prefix(".tmp-") {
-                let ours = rest.split('-').next().is_some_and(is_hex_oid)
-                    && rest.contains(&format!("-ir{SEMANTIC_IR_VERSION}-"));
+                // Any IR version: temporaries left by an older build must not
+                // outlive an IR upgrade.
+                let mut parts = rest.split('-');
+                let ours = parts.next().is_some_and(is_hex_oid)
+                    && parts.next().is_some_and(|ir| {
+                        ir.strip_prefix("ir").is_some_and(|version| {
+                            !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit())
+                        })
+                    });
                 let old = entry
                     .metadata()?
                     .modified()?
