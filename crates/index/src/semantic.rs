@@ -3,7 +3,7 @@ use code_intel_core::{
     IndexedFile, file_id,
     language::Language,
     semantic::{
-        AliasOf, Binding, ClassInfo, CommonJs, CommonJsExport, Export, Location,
+        AliasOf, Binding, BuiltinSymbolKey, ClassInfo, CommonJs, CommonJsExport, Export, Location,
         MEMBER_ONLY_EXPORT_REASONS, MemberContext, MemberWrite, Module, NameAt, ObjectProperty,
         ObjectTable, Relationship, Symbol, Usage,
     },
@@ -136,14 +136,16 @@ pub fn extract(root: Node<'_>, source: &str, file: &IndexedFile) -> Module {
         mutated.dedup();
         binding.mutated_members = mutated;
     }
-    classes(root, source, file, &members, &mut module);
+    classes(root, source, file, &members, &writes, &mut module);
     module.member_writes = members;
     prototypes(root, source, &mut module);
     if commonjs_file {
         commonjs(root, source, file, &writes, &mut module);
     }
-    if Language::of(&file.path).is_some_and(Language::is_javascript) {
-        origins(&mut module, root, source);
+    let javascript = Language::of(&file.path).is_some_and(Language::is_javascript);
+    origins(&mut module, root, source, javascript);
+    receiver_escapes(&mut module, root, source);
+    if javascript {
         objects(root, source, file, &mut module);
         prototype_tables(root, source, file, &mut module);
     }
@@ -720,11 +722,13 @@ fn class_fact(class: Node<'_>, file: &IndexedFile) -> Option<String> {
 /// Own-property evidence for each indexed class: field declarations, string or
 /// computed member names, `this.m` writes in its members, and calls that may add
 /// arbitrary own properties (`Object.assign(this, …)`).
+#[allow(clippy::too_many_lines)] // Members, `this` writes, then computed keys: one pass per class.
 fn classes(
     root: Node<'_>,
     source: &str,
     file: &IndexedFile,
     writes: &[MemberWrite],
+    rebound: &[(String, usize)],
     module: &mut Module,
 ) {
     for fact in file.facts.iter().filter(|fact| fact.kind == "class") {
@@ -762,16 +766,24 @@ fn classes(
                         field.then(|| text(name, source).to_owned())
                     }
                     "string" | "number" => Some(literal(name, source)),
-                    // `[Symbol.iterator]()` cannot collide with an identifier name.
-                    "computed_property_name"
-                        if name.named_child(0).is_some_and(|key| {
-                            key.kind() == "member_expression"
-                                && key
-                                    .child_by_field_name("object")
-                                    .is_some_and(|object| text(object, source) == "Symbol")
-                        }) =>
-                    {
-                        None
+                    // `[Symbol.iterator]()` cannot collide with an identifier
+                    // name, but only while `Symbol` is the global (IR 5).
+                    "computed_property_name" => {
+                        match name
+                            .named_child(0)
+                            .map(|key| computed_key(key, root, source, module, rebound))
+                        {
+                            Some(ComputedKey::Named(named)) => Some(named),
+                            Some(ComputedKey::Symbol) => None,
+                            Some(ComputedKey::Builtin(key)) => {
+                                info.builtin_symbol_keys.push(key);
+                                None
+                            }
+                            Some(ComputedKey::Unknown) | None => {
+                                info.dynamic_members = true;
+                                None
+                            }
+                        }
                     }
                     _ => {
                         info.dynamic_members = true;
@@ -787,21 +799,41 @@ fn classes(
                 }
             }
             dynamic_this(body, source, &mut info);
+            info.constructor_returns = constructor_returns(body, source);
         }
         for write in writes.iter().filter(|write| {
             write.receiver.as_deref() == Some("this")
                 && fact.start_byte <= write.offset
                 && write.offset < fact.end_byte
         }) {
-            match &write.property {
-                // Written in a static or instance member: list it as both.
-                Some(property) => {
-                    info.instance_fields.push(property.clone());
-                    info.static_fields.push(property.clone());
+            // Written in a static or instance member: list it as both.
+            if let Some(property) = &write.property {
+                info.instance_fields.push(property.clone());
+                info.static_fields.push(property.clone());
+            } else {
+                // `this[key] = …`: unknown unless the key is a proven symbol
+                // (string and integer literals are already named, IR 5).
+                let key = root
+                    .descendant_for_byte_range(write.offset, write.offset)
+                    .and_then(|mut node| {
+                        while node.start_byte() == write.offset {
+                            if node.kind() == "subscript_expression" {
+                                return node.child_by_field_name("index");
+                            }
+                            node = node.parent()?;
+                        }
+                        None
+                    });
+                match key.map(|key| computed_key(key, root, source, module, rebound)) {
+                    Some(ComputedKey::Symbol) => {}
+                    Some(ComputedKey::Builtin(key)) => info.builtin_symbol_keys.push(key),
+                    Some(ComputedKey::Named(_) | ComputedKey::Unknown) | None => {
+                        info.dynamic_members = true;
+                    }
                 }
-                None => info.dynamic_members = true,
             }
         }
+        info.builtin_symbol_keys.dedup();
         for list in [&mut info.instance_fields, &mut info.static_fields] {
             list.sort();
             list.dedup();
@@ -987,6 +1019,7 @@ fn bind(
             commonjs: false,
             alias: None,
             constructed: None,
+            escapes: None,
         });
     } else {
         let mut cursor = name.walk();
@@ -1169,6 +1202,7 @@ fn imports(node: Node<'_>, root: Node<'_>, source: &str, file: &IndexedFile, mod
             commonjs: false,
             alias: None,
             constructed: None,
+            escapes: None,
         });
     }
 }
@@ -1586,8 +1620,15 @@ fn assigned_names(
                     .map(|property| text(property, source).to_owned())
             } else {
                 node.child_by_field_name("index")
-                    .filter(|index| index.kind() == "string")
-                    .map(|index| literal(index, source))
+                    .and_then(|index| match index.kind() {
+                        "string" if !text(index, source).contains('\\') => {
+                            Some(literal(index, source))
+                        }
+                        // `x[0]` writes the property "0" (JavaScript property-key
+                        // coercion); only canonical decimal integers are named.
+                        "number" => canonical_integer(text(index, source)),
+                        _ => None,
+                    })
             };
             // `module.exports.x` and `F.prototype.x` keep their dotted receiver so
             // the binder can tell export and prototype statements from writes
@@ -1687,7 +1728,9 @@ fn declared_exports<'a>(statement: Node<'a>, source: &str) -> Option<(Node<'a>, 
 
 /// Alias (`const v = w`, `const v = w.p`) and constructor (`const x = new F()`)
 /// origins of declared bindings. `require(…)` declarators are `CommonJS` bindings.
-fn origins(module: &mut Module, root: Node<'_>, source: &str) {
+/// TypeScript records only constructor origins: its aliases keep the 0.1.2
+/// lexical rule.
+fn origins(module: &mut Module, root: Node<'_>, source: &str, javascript: bool) {
     for binding in &mut module.bindings {
         if binding.module.is_some() || binding.commonjs {
             continue;
@@ -1708,13 +1751,15 @@ fn origins(module: &mut Module, root: Node<'_>, source: &str) {
             continue;
         };
         match value.kind() {
-            "identifier" if !matches!(text(value, source), "undefined" | "arguments") => {
+            "identifier"
+                if javascript && !matches!(text(value, source), "undefined" | "arguments") =>
+            {
                 binding.alias = Some(AliasOf {
                     name: text(value, source).into(),
                     member: None,
                 });
             }
-            "member_expression" => {
+            "member_expression" if javascript => {
                 if let Some((name, member)) = local_member(value, source) {
                     binding.alias = Some(AliasOf {
                         name,
@@ -1723,13 +1768,421 @@ fn origins(module: &mut Module, root: Node<'_>, source: &str) {
                 }
             }
             "new_expression" => {
-                binding.constructed = value
-                    .child_by_field_name("constructor")
-                    .filter(|constructor| constructor.kind() == "identifier")
-                    .map(|constructor| text(constructor, source).into());
+                binding.constructed =
+                    value
+                        .child_by_field_name("constructor")
+                        .and_then(|constructor| match constructor.kind() {
+                            "identifier" => Some(text(constructor, source).to_owned()),
+                            // `new ns.C()`: a namespace or module member.
+                            "member_expression" => local_member(constructor, source)
+                                .map(|(name, member)| format!("{name}.{member}")),
+                            _ => None,
+                        });
             }
             _ => {}
         }
+    }
+}
+
+/// `0`, `7`, `42`: a decimal integer literal whose text is the property key
+/// JavaScript coerces it to. Leading zeros, fractions, exponents, separators,
+/// other radixes and values beyond 2^53 are not named.
+fn canonical_integer(literal: &str) -> Option<String> {
+    let canonical = !literal.is_empty()
+        && literal.len() <= 15
+        && literal.bytes().all(|byte| byte.is_ascii_digit())
+        && (literal == "0" || !literal.starts_with('0'));
+    canonical.then(|| literal.to_owned())
+}
+
+/// The binding `name` resolves to at `offset`: the innermost visible one, or
+/// `None` when there is none or several share the innermost scope.
+fn visible_binding(module: &Module, name: &str, offset: usize) -> Option<usize> {
+    innermost(module, 0..module.bindings.len(), name, offset)
+}
+
+/// [`visible_binding`] over candidate binding indexes (all with that name, or a superset).
+fn innermost(
+    module: &Module,
+    candidates: impl IntoIterator<Item = usize>,
+    name: &str,
+    offset: usize,
+) -> Option<usize> {
+    let mut best: Option<(usize, usize)> = None;
+    let mut tied = false;
+    for index in candidates {
+        let binding = &module.bindings[index];
+        if binding.name != name || offset < binding.scope_start || offset >= binding.scope_end {
+            continue;
+        }
+        let size = binding.scope_end - binding.scope_start;
+        match best {
+            Some((_, smallest)) if size > smallest => {}
+            Some((_, smallest)) if size == smallest => tied = true,
+            _ => {
+                best = Some((index, size));
+                tied = false;
+            }
+        }
+    }
+    best.filter(|_| !tied).map(|(index, _)| index)
+}
+
+/// Is the global `name` (`Symbol`) unshadowed and never assigned in this module?
+fn global(module: &Module, writes: &[(String, usize)], name: &str, offset: usize) -> bool {
+    !module.bindings.iter().any(|binding| {
+        binding.name == name && binding.scope_start <= offset && offset < binding.scope_end
+    }) && !writes.iter().any(|(written, _)| written == name)
+}
+
+/// Well-known symbols (ECMAScript, plus explicit resource management).
+const WELL_KNOWN_SYMBOLS: [&str; 15] = [
+    "asyncDispose",
+    "asyncIterator",
+    "dispose",
+    "hasInstance",
+    "isConcatSpreadable",
+    "iterator",
+    "match",
+    "matchAll",
+    "replace",
+    "search",
+    "species",
+    "split",
+    "toPrimitive",
+    "toStringTag",
+    "unscopables",
+];
+
+/// What a computed property key statically is.
+enum ComputedKey {
+    /// A string or integer key with this name.
+    Named(String),
+    /// A symbol that cannot equal any string-named property: a well-known
+    /// symbol of the global `Symbol`, `Symbol.for("literal")`, or a
+    /// `const k = Symbol(…)` binding.
+    Symbol,
+    /// A Node.js built-in symbol reached through a module binding; the binder
+    /// checks the specifier is the built-in module.
+    Builtin(BuiltinSymbolKey),
+    Unknown,
+}
+
+/// Classify a computed key expression. Anything not proven from source and
+/// the language's built-ins is `Unknown`: a shadowed or reassigned `Symbol`,
+/// `Symbol.for(name)`, `getKey()`, a mutable binding or another module's value.
+fn computed_key(
+    key: Node<'_>,
+    root: Node<'_>,
+    source: &str,
+    module: &Module,
+    writes: &[(String, usize)],
+) -> ComputedKey {
+    let mut key = key;
+    while key.kind() == "parenthesized_expression" {
+        let Some(inner) = key.named_child(0) else {
+            return ComputedKey::Unknown;
+        };
+        key = inner;
+    }
+    let offset = key.start_byte();
+    let symbol_global = || global(module, writes, "Symbol", offset);
+    match key.kind() {
+        "string" if !text(key, source).contains('\\') => ComputedKey::Named(literal(key, source)),
+        "number" => {
+            canonical_integer(text(key, source)).map_or(ComputedKey::Unknown, ComputedKey::Named)
+        }
+        "member_expression" => {
+            if let Some((object, property)) = local_member(key, source)
+                && object == "Symbol"
+                && WELL_KNOWN_SYMBOLS.contains(&property.as_str())
+                && symbol_global()
+            {
+                return ComputedKey::Symbol;
+            }
+            builtin_symbol(key, source, module).map_or(ComputedKey::Unknown, ComputedKey::Builtin)
+        }
+        "call_expression" => {
+            let registered = key
+                .child_by_field_name("function")
+                .and_then(|function| local_member(function, source))
+                .is_some_and(|(object, property)| object == "Symbol" && property == "for");
+            let literal_argument = key
+                .child_by_field_name("arguments")
+                .is_some_and(|arguments| {
+                    arguments.named_child_count() == 1
+                        && arguments.named_child(0).is_some_and(|argument| {
+                            argument.kind() == "string" && !text(argument, source).contains('\\')
+                        })
+                });
+            if registered && literal_argument && symbol_global() {
+                ComputedKey::Symbol
+            } else {
+                ComputedKey::Unknown
+            }
+        }
+        "identifier" => {
+            let Some(index) = visible_binding(module, text(key, source), offset) else {
+                return ComputedKey::Unknown;
+            };
+            let binding = &module.bindings[index];
+            if binding.mutated || binding.module.is_some() || binding.commonjs {
+                return ComputedKey::Unknown;
+            }
+            // `const k = Symbol()` / `let k = Symbol("description")`.
+            let unique = root
+                .descendant_for_byte_range(binding.location.start_byte, binding.location.end_byte)
+                .and_then(|name| name.parent())
+                .filter(|declarator| {
+                    declarator.kind() == "variable_declarator"
+                        && declarator
+                            .parent()
+                            .is_some_and(|declaration| declaration.kind() == "lexical_declaration")
+                })
+                .and_then(|declarator| declarator.child_by_field_name("value"))
+                .filter(|value| value.kind() == "call_expression")
+                .and_then(|call| call.child_by_field_name("function"))
+                .is_some_and(|function| {
+                    function.kind() == "identifier"
+                        && text(function, source) == "Symbol"
+                        && global(module, writes, "Symbol", function.start_byte())
+                });
+            if unique {
+                ComputedKey::Symbol
+            } else {
+                ComputedKey::Unknown
+            }
+        }
+        _ => ComputedKey::Unknown,
+    }
+}
+
+/// `util.inspect.custom` / `inspect.custom` where the binding is an unwritten
+/// `require()` or `import` of `util` / `node:util`.
+fn builtin_symbol(key: Node<'_>, source: &str, module: &Module) -> Option<BuiltinSymbolKey> {
+    let property = key
+        .child_by_field_name("property")
+        .filter(|property| text(*property, source) == "custom")?;
+    let object = key.child_by_field_name("object")?;
+    let (binding_name, imported, read): (String, &[&str], Option<String>) = match object.kind() {
+        // `inspect.custom` with `inspect` imported from util.
+        "identifier" => (text(object, source).to_owned(), &["inspect"], None),
+        // `util.inspect.custom` with the module object.
+        "member_expression" => {
+            let (name, member) = local_member(object, source)?;
+            if member != "inspect" {
+                return None;
+            }
+            (name, &["*", "default"], Some(member))
+        }
+        _ => return None,
+    };
+    let binding = &module.bindings[visible_binding(module, &binding_name, key.start_byte())?];
+    let specifier = binding.module.as_deref()?;
+    let written = |member: &str| {
+        binding
+            .mutated_members
+            .iter()
+            .any(|written| written == member || written == "*")
+    };
+    let valid = matches!(specifier, "util" | "node:util")
+        && imported.contains(&binding.imported.as_str())
+        && !(binding.commonjs && binding.imported == "default")
+        && !binding.mutated
+        && !binding.type_only
+        && read.as_deref().is_none_or(|member| !written(member))
+        && (read.is_some() || !written(text(property, source)));
+    valid.then(|| BuiltinSymbolKey {
+        expression: text(key, source).to_owned(),
+        specifier: specifier.to_owned(),
+        property: text(property, source).to_owned(),
+    })
+}
+
+/// Does a class `constructor` return a value other than `this`? Returns in
+/// nested functions and classes belong to them.
+fn constructor_returns(body: Node<'_>, source: &str) -> bool {
+    let mut cursor = body.walk();
+    body.named_children(&mut cursor).any(|member| {
+        member.kind() == "method_definition"
+            && member
+                .child_by_field_name("name")
+                .is_some_and(|name| text(name, source) == "constructor")
+            && !token(member, "static")
+            && member
+                .child_by_field_name("body")
+                .is_some_and(|body| returns_value(body))
+    })
+}
+fn returns_value(node: Node<'_>) -> bool {
+    if node.kind() == "return_statement" {
+        return node
+            .named_child(0)
+            .is_some_and(|value| value.kind() != "this" && value.kind() != "comment");
+    }
+    if is_function(node) || matches!(node.kind(), "class" | "class_declaration") {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    children.into_iter().any(returns_value)
+}
+
+/// Why each constructed binding (`const x = new C()`) and identifier alias
+/// (`const y = x`) may let its value reach code Repogi does not follow.
+/// Member accesses, calls, comparisons, `typeof`, and an alias declaration
+/// (whose own uses then count, transitively) keep the value local; passing,
+/// returning, storing, assigning or exporting it does not. Member writes
+/// through an alias are also writes through the original binding.
+fn receiver_escapes(module: &mut Module, root: Node<'_>, source: &str) {
+    let tracked: Vec<usize> = module
+        .bindings
+        .iter()
+        .enumerate()
+        .filter(|(_, binding)| {
+            binding.constructed.is_some()
+                || binding
+                    .alias
+                    .as_ref()
+                    .is_some_and(|alias| alias.member.is_none())
+        })
+        .map(|(index, _)| index)
+        .collect();
+    if tracked.is_empty() {
+        return;
+    }
+    let names: std::collections::HashSet<String> = tracked
+        .iter()
+        .map(|index| module.bindings[*index].name.clone())
+        .collect();
+    // Every binding with a tracked name, so each occurrence only compares
+    // same-named bindings (large files stay linear in practice).
+    let mut by_name: std::collections::HashMap<&str, Vec<usize>> = std::collections::HashMap::new();
+    for (index, binding) in module.bindings.iter().enumerate() {
+        if names.contains(&binding.name) {
+            by_name
+                .entry(binding.name.as_str())
+                .or_default()
+                .push(index);
+        }
+    }
+    let tracked_set: std::collections::HashSet<usize> = tracked.iter().copied().collect();
+    let mut direct: std::collections::HashMap<usize, &'static str> =
+        std::collections::HashMap::new();
+    let mut children: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if matches!(node.kind(), "comment" | "string" | "template_chars") {
+            continue;
+        }
+        if matches!(node.kind(), "identifier" | "shorthand_property_identifier")
+            && let Some(candidates) = by_name.get(text(node, source))
+            && let Some(index) = innermost(
+                module,
+                candidates.iter().copied(),
+                text(node, source),
+                node.start_byte(),
+            )
+            && tracked_set.contains(&index)
+        {
+            match use_of(node, &module.bindings[index], module, source) {
+                Use::Local => {}
+                Use::Alias(alias) => children.entry(index).or_default().push(alias),
+                Use::Escapes(reason) => {
+                    direct.entry(index).or_insert(reason);
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        pending.extend(node.named_children(&mut cursor));
+    }
+    // An alias's escapes and member writes are the original value's too.
+    for &index in &tracked {
+        let mut reason = direct.get(&index).map(|reason| (*reason).to_owned());
+        let mut members = module.bindings[index].mutated_members.clone();
+        let mut stack = children.get(&index).cloned().unwrap_or_default();
+        let mut visited = std::collections::HashSet::from([index]);
+        while let Some(alias) = stack.pop() {
+            if !visited.insert(alias) {
+                continue;
+            }
+            if visited.len() > 64 {
+                reason.get_or_insert_with(|| "alias_chain_too_long".into());
+                break;
+            }
+            if reason.is_none()
+                && let Some(escaped) = direct.get(&alias)
+            {
+                reason = Some(format!("{escaped} through {}", module.bindings[alias].name));
+            }
+            members.extend(module.bindings[alias].mutated_members.iter().cloned());
+            stack.extend(children.get(&alias).into_iter().flatten().copied());
+        }
+        members.sort();
+        members.dedup();
+        let binding = &mut module.bindings[index];
+        binding.escapes = reason;
+        binding.mutated_members = members;
+    }
+}
+
+/// How one occurrence of a tracked binding uses its value.
+enum Use {
+    /// Member access, call, comparison, `typeof`, or a rebinding of the name.
+    Local,
+    /// `const y = x`: the alias binding's uses count too.
+    Alias(usize),
+    /// Passed, returned, stored, assigned, exported or otherwise a value.
+    Escapes(&'static str),
+}
+
+fn use_of(node: Node<'_>, binding: &Binding, module: &Module, source: &str) -> Use {
+    if node.start_byte() == binding.location.start_byte {
+        // The declaration's own name: exported declarations escape.
+        let exported = node
+            .parent()
+            .and_then(|declarator| declarator.parent())
+            .and_then(|declaration| declaration.parent())
+            .is_some_and(|statement| statement.kind() == "export_statement");
+        return if exported {
+            Use::Escapes("exported")
+        } else {
+            Use::Local
+        };
+    }
+    let Some(parent) = node.parent() else {
+        return Use::Escapes("used_as_value");
+    };
+    let field = |name: &str| parent.child_by_field_name(name) == Some(node);
+    match parent.kind() {
+        "member_expression" | "subscript_expression" if field("object") => Use::Local,
+        "call_expression" if field("function") => Use::Local,
+        "binary_expression" | "expression_statement" => Use::Local,
+        "unary_expression" if ["typeof", "!", "void"].iter().any(|op| token(parent, op)) => {
+            Use::Local
+        }
+        // `x = …` rebinds `x` (recorded as a mutation, not an escape).
+        "assignment_expression" if field("left") => Use::Local,
+        "variable_declarator" if field("value") => parent
+            .child_by_field_name("name")
+            .filter(|name| name.kind() == "identifier")
+            .and_then(|name| {
+                module.bindings.iter().position(|alias| {
+                    alias.location.start_byte == name.start_byte()
+                        && alias.alias.as_ref().is_some_and(|origin| {
+                            origin.member.is_none() && origin.name == text(node, source)
+                        })
+                })
+            })
+            .map_or(Use::Escapes("aliased"), Use::Alias),
+        "arguments" => Use::Escapes("passed_as_argument"),
+        "return_statement" => Use::Escapes("returned"),
+        "arrow_function" if field("body") => Use::Escapes("returned"),
+        "export_specifier" => Use::Escapes("exported"),
+        "assignment_expression" | "pair" | "array" => Use::Escapes("stored"),
+        _ if node.kind() == "shorthand_property_identifier" => Use::Escapes("stored"),
+        _ => Use::Escapes("used_as_value"),
     }
 }
 
@@ -2223,6 +2676,62 @@ mod invalidation_tests {
             .iter()
             .find(|binding| binding.name == name)
             .unwrap_or_else(|| panic!("no binding {name}"))
+    }
+
+    #[test]
+    fn integer_and_symbol_keys_are_classified_conservatively() {
+        assert_eq!(super::canonical_integer("0").as_deref(), Some("0"));
+        assert_eq!(super::canonical_integer("42").as_deref(), Some("42"));
+        for text in ["01", "1.5", "1e3", "0x10", "1_000", "9007199254740993", ""] {
+            assert_eq!(super::canonical_integer(text), None, "{text}");
+        }
+        let module = module(
+            "a.js",
+            "const x = {};\nx[0] = 1;\nx[1.5] = 2;\nx['\\u0061'] = 3;\n",
+        );
+        assert_eq!(binding(&module, "x").mutated_members, vec!["*", "0"]);
+        let module = module_with_classes(
+            "class A { constructor() { this[Symbol.iterator] = 1; } }\n\
+             class B { constructor() { this[Symbol.for('k')] = 1; } }\n\
+             const k = Symbol();\nclass C { constructor() { this[k] = 1; } }\n\
+             let j = Symbol();\nj = 'x';\nclass D { constructor() { this[j] = 1; } }\n\
+             class E { constructor(n) { this[Symbol.for(n)] = 1; } }\n\
+             class F { constructor() { return new Proxy(this, {}); } }\n\
+             class G { constructor() { const f = () => { return 1; }; return this; } }\n",
+        );
+        let dynamic: Vec<bool> = module.classes.iter().map(|c| c.dynamic_members).collect();
+        assert_eq!(dynamic, vec![false, false, false, true, true, false, false]);
+        let returns: Vec<bool> = module
+            .classes
+            .iter()
+            .map(|c| c.constructor_returns)
+            .collect();
+        assert_eq!(
+            returns,
+            vec![false, false, false, false, false, true, false]
+        );
+        // A shadowed `Symbol` is any object.
+        let shadowed = module_with_classes(
+            "const Symbol = { iterator: 'm' };\nclass A { constructor() { this[Symbol.iterator] = 1; } m() {} }\n",
+        );
+        assert!(shadowed.classes[0].dynamic_members);
+        // `util.inspect.custom` is left to the binder only for util bindings.
+        let util = module_with_classes(
+            "const util = require('node:util');\nclass A { constructor() { this[util.inspect.custom] = 1; } }\n\
+             const fake = make();\nclass B { constructor() { this[fake.inspect.custom] = 1; } }\n",
+        );
+        assert!(!util.classes[0].dynamic_members);
+        assert_eq!(
+            util.classes[0].builtin_symbol_keys[0].specifier,
+            "node:util"
+        );
+        assert!(util.classes[1].dynamic_members);
+    }
+
+    fn module_with_classes(source: &str) -> code_intel_core::semantic::Module {
+        let module = module("classes.js", source);
+        assert!(!module.classes.is_empty());
+        module
     }
 
     #[test]

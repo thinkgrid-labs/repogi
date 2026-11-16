@@ -1,0 +1,14 @@
+import { createSession, Session } from '@acme/session';
+import { sign } from '@acme/session/tokens';
+import { hidden } from '@acme/session/src/internal.js';
+import core from '@acme/core';
+import { dup } from '@acme/dup';
+import { old } from '@acme/legacy';
+import { chunk } from 'lodash';
+const s = createSession();
+s.validate();
+const t = new Session();
+t.validate();
+sign();
+const c = new core.Core();
+c.start();

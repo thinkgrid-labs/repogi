@@ -27,9 +27,16 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
     let mut module_files = BTreeSet::new();
     let mut package_types = BTreeMap::new();
     let mut packages = BTreeMap::new();
+    let mut manifests = BTreeSet::new();
+    let mut symlinks = BTreeSet::new();
     for entry in entries {
         if entry.file_type().is_some_and(|kind| kind.is_dir()) {
             continue;
+        }
+        if entry.path_is_symlink()
+            && let Some(relative) = entry.path().strip_prefix(root).ok().and_then(Path::to_str)
+        {
+            symlinks.insert(relative.replace('\\', "/"));
         }
         let Some(relative) = entry
             .path()
@@ -51,6 +58,7 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
         }
         let extension = Path::new(name).extension().and_then(|value| value.to_str());
         if name == "package.json" {
+            manifests.insert(directory.clone());
             package_types.insert(directory.clone(), package_type(root, &relative));
             if let Some(entry) = package_entry(root, &relative) {
                 packages.insert(directory.clone(), entry);
@@ -61,6 +69,21 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
         }
     }
     let mut diagnostics = Vec::new();
+    let workspace = crate::workspace::discover(root, &manifests, &symlinks);
+    if let Some(error) = workspace
+        .as_ref()
+        .and_then(|workspace| workspace.error.as_ref())
+    {
+        diagnostics.push(Diagnostic {
+            path: workspace
+                .as_ref()
+                .and_then(|workspace| workspace.declared_in.first().cloned())
+                .unwrap_or_else(|| "package.json".into()),
+            message: format!(
+                "workspace packages unsupported: {error}; imports of workspace package names stay unsupported"
+            ),
+        });
+    }
     let projects = configs
         .into_iter()
         .map(|(dir, config)| {
@@ -83,6 +106,7 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
             other_files: module_files,
             package_types,
             packages,
+            workspace,
         },
         diagnostics,
     )
@@ -496,7 +520,7 @@ fn exports_target(value: &Ordered, depth: usize, budget: &mut usize) -> ExportsT
 }
 
 /// A regular, non-symlinked config file inside the root, within the size cap.
-fn read(root: &Path, relative: &str) -> Result<String, String> {
+pub(crate) fn read(root: &Path, relative: &str) -> Result<String, String> {
     let path = root.join(relative);
     let metadata =
         fs::symlink_metadata(&path).map_err(|_| format!("`{relative}` does not exist"))?;

@@ -63,7 +63,11 @@ pub struct SemanticEdge {
 /// 4 (`JavaScript` only): callable facts for function-valued assignments,
 /// object-literal members and class expressions; object and prototype tables;
 /// alias and `new` origins of bindings; chained `exports = module.exports`.
-pub const SEMANTIC_IR_VERSION: u32 = 4;
+/// 5: `new C()` origins in TypeScript too (also `new ns.C()`), receiver escape
+/// reasons of constructed and aliased bindings, constructors that return a
+/// value, statically identified symbol keys (`this[Symbol.iterator]`,
+/// `this[util.inspect.custom]`) and canonical integer keys (`x[0]`).
+pub const SEMANTIC_IR_VERSION: u32 = 5;
 
 /// Cached syntax IR, not claims of resolved bindings. Scope ranges are half-open bytes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -163,6 +167,27 @@ pub struct ClassInfo {
     /// or similar: any member name may be an own property.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dynamic_members: bool,
+    /// A `constructor` that returns a value other than `this`: `new C()` may
+    /// produce another object (IR 5).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub constructor_returns: bool,
+    /// Computed own-property keys that name a Node.js built-in symbol through
+    /// a module binding (`this[util.inspect.custom] = …`). They cannot collide
+    /// with string-named members only if the specifier is the built-in module,
+    /// which the binder checks; otherwise the class has dynamic members (IR 5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub builtin_symbol_keys: Vec<BuiltinSymbolKey>,
+}
+
+/// A computed key `util.inspect.custom` (or `inspect.custom`) whose binding is
+/// a `require()`/`import` of `specifier` (`util` or `node:util`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuiltinSymbolKey {
+    pub expression: String,
+    pub specifier: String,
+    /// The property the expression reads last (`custom`): a write of it on an
+    /// untracked receiver could change the key.
+    pub property: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,9 +281,16 @@ pub struct Binding {
     /// once at the declaration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<AliasOf>,
-    /// `const x = new F(…)` (`JavaScript`): the constructor identifier.
+    /// `const x = new F(…)`: the constructor identifier, or `ns.F`
+    /// (`JavaScript`; TypeScript too since IR 5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constructed: Option<String>,
+    /// For constructed and identifier-aliased bindings (IR 5): why the value
+    /// may reach code Repogi does not follow (passed, returned, stored,
+    /// exported), including through a `const b = x` alias. `None` when every
+    /// use is a member access, a call, a comparison or such an alias.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escapes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -331,6 +363,44 @@ pub struct ResolutionContext {
     /// Entry-point fields of each `package.json` that declares any, by directory.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub packages: BTreeMap<String, PackageEntry>,
+    /// Workspace packages declared by the repository root (IR-independent;
+    /// part of the resolution fingerprint).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<Workspace>,
+}
+
+/// Local workspace packages declared at the repository root by
+/// `package.json` `workspaces` and/or `pnpm-workspace.yaml`, read as data.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Workspace {
+    /// The declaring files (`package.json`, `pnpm-workspace.yaml`).
+    pub declared_in: Vec<String>,
+    /// Member packages with a `name`, sorted by directory.
+    pub packages: Vec<WorkspacePackage>,
+    /// Why member identities cannot be trusted (unsupported pattern, unreadable
+    /// member manifest, symlinked member, conflicting declarations); then no
+    /// workspace import resolves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Dependency declarations on member names, by the declaring
+    /// `package.json` directory: name -> version specifier.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependencies: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspacePackage {
+    pub name: String,
+    /// Repository-relative package directory.
+    pub dir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// `types` (else `typings`): TypeScript's entry when `exports` is not used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub types: Option<String>,
+    /// `typesVersions` is present: TypeScript may redirect any path.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub types_versions: bool,
 }
 
 /// The entry-point fields of a local `package.json`, read as data.

@@ -6,7 +6,7 @@ Start with [installation](DEVELOPER_PREVIEW_INSTALLATION.md) (prebuilt binaries,
 
 ## Releases
 
-The latest published release is **0.1.2**, with prebuilt Linux and macOS binaries for TypeScript/TSX and JavaScript/JSX (`.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`) code intelligence, project knowledge, knowledge relationships, agent investigation, project memory and the `init`, `doctor` and `agent add` commands. The next release, **0.1.4**, is in source and unpublished: deeper JavaScript analysis ([draft release notes](RELEASE_NOTES_0.1.4.md), [static analysis accuracy](STATIC_ANALYSIS_ACCURACY.md)). Until it is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
+The latest published release is **0.1.2**, with prebuilt Linux and macOS binaries for TypeScript/TSX and JavaScript/JSX (`.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`) code intelligence, project knowledge, knowledge relationships, agent investigation, project memory and the `init`, `doctor` and `agent add` commands. The next release, **0.1.3**, is in source and unpublished: deeper JavaScript analysis and workspace packages ([draft release notes](RELEASE_NOTES_0.1.3.md), [static analysis accuracy](STATIC_ANALYSIS_ACCURACY.md), [workspace packages](WORKSPACE_INTELLIGENCE.md)). Until it is published, [build from source](DEVELOPER_PREVIEW_INSTALLATION.md#build-from-source) to use it.
 
 The 0.1.0 binary cannot read indexes written by newer builds. It refuses them with `unsupported index schema` and changes nothing. A newer build upgrades a 0.1.0 index the next time you run `repogi index`.
 
@@ -27,7 +27,7 @@ The 0.1.0 binary cannot read indexes written by newer builds. It refuses them wi
 
 ## API and architecture
 
-- [Architecture](ARCHITECTURE.md), [semantic scope](SEMANTICS.md), [static analysis accuracy](STATIC_ANALYSIS_ACCURACY.md), [module resolution](MODULE_RESOLUTION.md), [JSX references](JSX_SEMANTICS.md) and [grammar limitations](TYPESCRIPT_GRAMMAR_LIMITATIONS.md).
+- [Architecture](ARCHITECTURE.md), [semantic scope](SEMANTICS.md), [static analysis accuracy](STATIC_ANALYSIS_ACCURACY.md), [module resolution](MODULE_RESOLUTION.md), [workspace packages](WORKSPACE_INTELLIGENCE.md), [JSX references](JSX_SEMANTICS.md) and [grammar limitations](TYPESCRIPT_GRAMMAR_LIMITATIONS.md).
 - [MCP impact](MCP_IMPACT.md) and [MCP affected tests](MCP_TEST_DISCOVERY.md).
 - [Verification manifests](VERIFICATION_MANIFEST.md), [MCP artifact transport](MCP_VERIFICATION_MANIFEST.md), [reference consumer](MANIFEST_CONSUMER_INTEROPERABILITY.md) and [CI artifact integration](CI_ARTIFACT_INTEGRATION.md).
 

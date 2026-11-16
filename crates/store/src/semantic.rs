@@ -5,7 +5,7 @@ use code_intel_core::{
     semantic::{
         Binding, ClassInfo, CommonJsExport, Evidence, ExportsTarget, Location, Module,
         ObjectProperty, ObjectTable, PackageEntry, PathMapping, Project, Relationship, Resolution,
-        ResolutionContext, SemanticEdge, Symbol, Usage,
+        ResolutionContext, SemanticEdge, Symbol, Usage, WorkspacePackage,
     },
 };
 use std::{
@@ -55,6 +55,11 @@ struct Hierarchy {
     /// Function declarations whose prototype is changed outside its table
     /// statements (in another module, or through an alias).
     prototype_tainted: HashSet<String>,
+    /// Classes with a built-in symbol key (`this[util.inspect.custom] = …`)
+    /// whose module binding is not proven to be the Node.js built-in, or whose
+    /// final property is written on an untracked receiver: any own member name
+    /// is possible.
+    unverified_symbols: HashSet<String>,
 }
 
 /// Bound on nested `package.json` `main` redirects followed for one lookup.
@@ -231,7 +236,10 @@ impl Resolver<'_> {
     #[allow(clippy::too_many_lines)] // TypeScript's ordered lookup, then self-reference.
     fn mapped(&self, path: &str, name: &str) -> Located {
         let Some(project) = self.project(path) else {
-            if let Some(located) = self.self_reference(path, name) {
+            if let Some(located) = self
+                .self_reference(path, name)
+                .or_else(|| self.workspace_package(path, name))
+            {
                 return located;
             }
             return Err(Targets::failure(
@@ -318,7 +326,9 @@ impl Resolver<'_> {
             return located;
         }
         if matched.is_none()
-            && let Some(located) = self.self_reference(path, name)
+            && let Some(located) = self
+                .self_reference(path, name)
+                .or_else(|| self.workspace_package(path, name))
         {
             return located;
         }
@@ -732,158 +742,325 @@ impl Resolver<'_> {
             let rest = name.strip_prefix(package_name)?.strip_prefix('/')?;
             format!("./{rest}")
         };
-        let config = if scope.is_empty() {
-            "package.json".to_owned()
-        } else {
-            format!("{scope}/package.json")
-        };
-        let mut steps = vec![format!("{importer}: {name} is its own package ({config})")];
-        let fail = |status, rule: &'static str, mut steps: Vec<String>, note: String| {
-            steps.push(note);
-            Some(Err(Targets::failure(status, rule, steps)))
-        };
-        let target = match exports {
-            ExportsTarget::Subpaths(entries) => {
-                match entries.iter().find(|(key, _)| *key == subpath) {
-                    Some((_, target)) => target,
-                    None if entries.iter().any(|(key, _)| key.contains('*')) => {
-                        return fail(
-                            Resolution::Unsupported,
-                            "package_exports_pattern",
-                            steps,
-                            format!("{config}: exports {subpath} only matches a pattern"),
-                        );
-                    }
-                    None => {
-                        return fail(
-                            Resolution::Unresolved,
-                            "package_subpath_not_exported",
-                            steps,
-                            format!("{config}: exports has no {subpath}"),
-                        );
-                    }
-                }
-            }
-            other if subpath == "." => other,
-            _ => {
-                return fail(
-                    Resolution::Unresolved,
-                    "package_subpath_not_exported",
-                    steps,
-                    format!("{config}: exports has no {subpath}"),
-                );
-            }
-        };
+        let config = manifest(scope);
+        let steps = vec![format!("{importer}: {name} is its own package ({config})")];
+        Some(self.exports_file(importer, name, scope, exports, &subpath, steps))
+    }
+    /// The file a package's `exports` names for `subpath`, with the conditions
+    /// a JavaScript importer's module kind selects in every tool.
+    fn exports_file(
+        &self,
+        importer: &str,
+        name: &str,
+        scope: &str,
+        exports: &ExportsTarget,
+        subpath: &str,
+        mut steps: Vec<String>,
+    ) -> Located {
+        let config = manifest(scope);
         let context = if self.commonjs_capable(importer) {
             "require"
         } else {
             "import"
         };
-        let mut current = target;
-        let mut chosen = Vec::new();
-        for _ in 0..16 {
-            match current {
-                ExportsTarget::Conditions(entries) => {
-                    let mut next = None;
-                    for (key, value) in entries {
-                        match key.as_str() {
-                            "types" => {}
-                            "require" | "import" if key != context => {}
-                            key if key == context || key == "default" => {
-                                next = Some((key.to_owned(), value));
-                                break;
-                            }
-                            other => {
-                                return fail(
-                                    Resolution::Unsupported,
-                                    "conditional_exports_tool_dependent",
-                                    steps,
-                                    format!(
-                                        "{config}: exports {subpath} condition {other} precedes {context}/default"
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                    let Some((key, value)) = next else {
-                        return fail(
-                            Resolution::Unresolved,
-                            "package_subpath_not_exported",
-                            steps,
-                            format!(
-                                "{config}: exports {subpath} has no {context}/default condition"
-                            ),
-                        );
-                    };
-                    chosen.push(key);
-                    current = value;
+        let other = if context == "require" {
+            "import"
+        } else {
+            "require"
+        };
+        let (path, chosen) = match exports_path(exports, subpath, &[context], &["types", other]) {
+            Ok(found) => found,
+            Err((status, rule, note)) => {
+                steps.push(format!("{config}: {note}"));
+                return Err(Targets::failure(status, rule, steps));
+            }
+        };
+        let Some(file) = package_target(scope, path) else {
+            steps.push(format!(
+                "{config}: exports target {path} is not a package-relative path"
+            ));
+            return Err(Targets::failure(
+                Resolution::Unsupported,
+                "invalid_package_target",
+                steps,
+            ));
+        };
+        steps.push(format!(
+            "{config}: exports {subpath}{} -> {path} => {file}",
+            conditions(&chosen)
+        ));
+        match self.first_present(std::slice::from_ref(&file)) {
+            Found::File(file) => {
+                if self.modules[&file].complete {
+                    Ok((file, steps))
+                } else {
+                    Err(Targets {
+                        uncertain: true,
+                        ..Targets::default()
+                    })
                 }
-                ExportsTarget::Path(path) => {
-                    let valid = path.starts_with("./")
-                        && !path
-                            .split('/')
-                            .any(|part| matches!(part, ".." | "node_modules"));
-                    let Some(file) = valid.then(|| join(scope, path)).flatten() else {
-                        return fail(
-                            Resolution::Unsupported,
-                            "invalid_package_target",
-                            steps,
-                            format!(
-                                "{config}: exports target {path} is not a package-relative path"
-                            ),
-                        );
-                    };
-                    steps.push(format!(
-                        "{config}: exports {subpath}{} -> {path} => {file}",
-                        if chosen.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" [{}]", chosen.join(", "))
-                        }
-                    ));
-                    return Some(match self.first_present(std::slice::from_ref(&file)) {
-                        Found::File(file) => {
-                            if self.modules[&file].complete {
-                                Ok((file, steps))
-                            } else {
-                                Err(Targets {
-                                    uncertain: true,
-                                    ..Targets::default()
-                                })
-                            }
-                        }
-                        Found::Missing => Err(Targets::failure(
-                            Resolution::Unresolved,
-                            "module_not_found",
-                            steps,
-                        )),
-                        other => Err(Self::failed(importer, name, other, steps, false)),
-                    });
-                }
-                ExportsTarget::Null => {
-                    return fail(
-                        Resolution::Unresolved,
-                        "package_subpath_not_exported",
-                        steps,
-                        format!("{config}: exports {subpath} is null"),
-                    );
-                }
-                ExportsTarget::Subpaths(_) | ExportsTarget::Unsupported(_) => {
+            }
+            Found::Missing => Err(Targets::failure(
+                Resolution::Unresolved,
+                "module_not_found",
+                steps,
+            )),
+            other => Err(Self::failed(importer, name, other, steps, false)),
+        }
+    }
+    /// A bare specifier naming a local workspace package that the importer's
+    /// own `package.json` declares as a dependency with a version the member
+    /// satisfies (a package manager links that member, not a registry copy).
+    /// `None` when no workspace member has the name.
+    #[allow(clippy::too_many_lines)] // Identity, declaration, then the entry point.
+    fn workspace_package(&self, importer: &str, name: &str) -> Option<Located> {
+        let workspace = self.resolution.workspace.as_ref()?;
+        let (package_name, rest) = split_package(name)?;
+        let members: Vec<&WorkspacePackage> = workspace
+            .packages
+            .iter()
+            .filter(|package| package.name == package_name)
+            .collect();
+        let member = *members.first()?;
+        let declared_in = workspace.declared_in.join(", ");
+        let mut steps = vec![format!(
+            "{declared_in}: workspace package {package_name} => {}",
+            manifest(&member.dir)
+        )];
+        let fail = |status, rule: &'static str, mut steps: Vec<String>, note: String| {
+            steps.push(note);
+            Some(Err(Targets::failure(status, rule, steps)))
+        };
+        if let Some(error) = &workspace.error {
+            return fail(
+                Resolution::Unsupported,
+                "invalid_workspace_configuration",
+                steps,
+                error.clone(),
+            );
+        }
+        if members.len() > 1 {
+            let dirs: Vec<&str> = members.iter().map(|member| member.dir.as_str()).collect();
+            return fail(
+                Resolution::Unsupported,
+                "duplicate_workspace_package",
+                steps,
+                format!(
+                    "{package_name} is declared by {} workspace packages: {}",
+                    members.len(),
+                    dirs.join(", ")
+                ),
+            );
+        }
+        // The importer's own package must declare the dependency.
+        let mut scope = importer.rsplit_once('/').map_or("", |(dir, _)| dir);
+        while !self.resolution.other_files.contains(&manifest(scope)) {
+            if scope.is_empty() {
+                return fail(
+                    Resolution::Unsupported,
+                    "workspace_dependency_not_declared",
+                    steps,
+                    format!("{importer}: no package.json declares {package_name}"),
+                );
+            }
+            scope = scope.rsplit_once('/').map_or("", |(dir, _)| dir);
+        }
+        let Some(spec) = workspace
+            .dependencies
+            .get(scope)
+            .and_then(|dependencies| dependencies.get(package_name))
+        else {
+            return fail(
+                Resolution::Unsupported,
+                "workspace_dependency_not_declared",
+                steps,
+                format!(
+                    "{}: does not declare a dependency on {package_name}",
+                    manifest(scope)
+                ),
+            );
+        };
+        if !satisfies(spec, member, scope) {
+            return fail(
+                Resolution::Unsupported,
+                "workspace_dependency_version_unverified",
+                steps,
+                format!(
+                    "{}: {package_name} {spec} is not known to select the workspace package{}",
+                    manifest(scope),
+                    member
+                        .version
+                        .as_deref()
+                        .map(|version| format!(" (version {version})"))
+                        .unwrap_or_default()
+                ),
+            );
+        }
+        steps.push(format!(
+            "{}: depends on {package_name} {spec}",
+            manifest(scope)
+        ));
+        let subpath = rest.map_or_else(|| ".".to_owned(), |rest| format!("./{rest}"));
+        if !Language::of(importer).is_some_and(Language::is_javascript) {
+            return Some(self.workspace_typescript(importer, name, member, &subpath, steps));
+        }
+        let entry = self.resolution.packages.get(&member.dir);
+        if let Some(exports) = entry.and_then(|entry| entry.exports.as_ref()) {
+            return Some(self.exports_file(importer, name, &member.dir, exports, &subpath, steps));
+        }
+        // No `exports`: Node.js loads the package directory (`main`, then
+        // `index`), or a subpath as a file, then as a directory.
+        let found = match rest {
+            None => match entry {
+                Some(entry) => self.package_main(&member.dir, &manifest(&member.dir), entry, 0),
+                None => self.first_present(&index_files(&member.dir)),
+            },
+            Some(rest) => match join(&member.dir, rest) {
+                Some(base) if inside(&member.dir, &base) => self.find_javascript(&base, 0),
+                _ => {
                     return fail(
                         Resolution::Unsupported,
-                        "package_exports_unsupported",
+                        "invalid_package_target",
                         steps,
-                        format!("{config}: exports {subpath} has an unsupported shape"),
+                        format!("{name}: subpath leaves the package"),
                     );
+                }
+            },
+        };
+        Some(match found {
+            Found::File(file) => Ok((file, steps)),
+            Found::Entry(file, step) => {
+                steps.push(step);
+                Ok((file, steps))
+            }
+            other => Err(Self::failed(importer, name, other, steps, false)),
+        })
+    }
+    /// A TypeScript importer of a workspace package: TypeScript's choice
+    /// depends on `moduleResolution`. `exports` (with `types`, `import`,
+    /// `require` and `default` conditions) is used by `node16`/`bundler`;
+    /// `types`/`typings`, `main` and `index` by `node10` and whenever
+    /// `exports` is absent. The import resolves only when every mode that
+    /// finds a file finds the same indexed one.
+    #[allow(clippy::too_many_lines)] // Each resolution mode, then the agreement check.
+    fn workspace_typescript(
+        &self,
+        importer: &str,
+        name: &str,
+        member: &WorkspacePackage,
+        subpath: &str,
+        mut steps: Vec<String>,
+    ) -> Located {
+        let config = manifest(&member.dir);
+        if member.types_versions {
+            steps.push(format!("{config}: typesVersions may redirect TypeScript"));
+            return Err(Targets::failure(
+                Resolution::Unsupported,
+                "workspace_entry_tool_dependent",
+                steps,
+            ));
+        }
+        let entry = self.resolution.packages.get(&member.dir);
+        // (step, result, from `exports`)
+        let mut found: Vec<(String, Found, bool)> = Vec::new();
+        if let Some(exports) = entry.and_then(|entry| entry.exports.as_ref()) {
+            for (context, other) in [("import", "require"), ("require", "import")] {
+                match exports_path(exports, subpath, &["types", context], &[other]) {
+                    Ok((path, chosen)) => {
+                        let Some(file) = package_target(&member.dir, path) else {
+                            steps.push(format!(
+                                "{config}: exports target {path} is not a package-relative path"
+                            ));
+                            return Err(Targets::failure(
+                                Resolution::Unsupported,
+                                "invalid_package_target",
+                                steps,
+                            ));
+                        };
+                        found.push((
+                            format!(
+                                "{config}: exports {subpath}{} -> {path}",
+                                conditions(&chosen)
+                            ),
+                            self.find_typescript(&file),
+                            true,
+                        ));
+                    }
+                    Err((Resolution::Unsupported, rule, note)) => {
+                        steps.push(format!("{config}: {note}"));
+                        return Err(Targets::failure(Resolution::Unsupported, rule, steps));
+                    }
+                    Err(_) => {}
                 }
             }
         }
-        fail(
-            Resolution::Unsupported,
-            "package_exports_unsupported",
-            steps,
-            format!("{config}: exports nesting too deep"),
-        )
+        let legacy = if subpath == "." {
+            match (&member.types, entry.and_then(|entry| entry.main.as_ref())) {
+                (Some(types), _) => {
+                    join(&member.dir, types).map(|base| (format!("types {types}"), base))
+                }
+                (None, Some(main)) => {
+                    join(&member.dir, main).map(|base| (format!("main {main}"), base))
+                }
+                (None, None) => join(&member.dir, "index").map(|base| ("index".to_owned(), base)),
+            }
+        } else {
+            join(&member.dir, subpath).map(|base| (subpath.to_owned(), base))
+        };
+        match legacy {
+            Some((label, base)) if inside(&member.dir, &base) => {
+                let result = self.find_typescript(&base);
+                // With `exports`, a mode that finds nothing does not compete.
+                if found.is_empty() || !matches!(result, Found::Missing) {
+                    found.push((
+                        format!("{config}: {label} (without exports)"),
+                        result,
+                        false,
+                    ));
+                }
+            }
+            _ => {
+                steps.push(format!("{config}: entry leaves the package"));
+                return Err(Targets::failure(
+                    Resolution::Unsupported,
+                    "invalid_package_target",
+                    steps,
+                ));
+            }
+        }
+        let mut files = BTreeSet::new();
+        for (step, result, exported) in found {
+            match result {
+                Found::File(file) => {
+                    steps.push(format!("{step} => {file}"));
+                    files.insert(file);
+                }
+                // An `exports` target that does not exist fails at run time.
+                Found::Missing if exported => {
+                    steps.push(format!("{step} (no module)"));
+                    return Err(Targets::failure(
+                        Resolution::Unresolved,
+                        "module_not_found",
+                        steps,
+                    ));
+                }
+                Found::Missing => steps.push(format!("{step} (no module)")),
+                other => return Err(Self::failed(importer, name, other, steps, false)),
+            }
+        }
+        match files.len() {
+            0 => Err(Targets::failure(
+                Resolution::Unresolved,
+                "module_not_found",
+                steps,
+            )),
+            1 => Ok((files.pop_first().expect("one file"), steps)),
+            _ => Err(Targets::failure(
+                Resolution::Unsupported,
+                "workspace_entry_tool_dependent",
+                steps,
+            )),
+        }
     }
     /// Export lookup. A lookup that starts outside any cycle (empty `seen`)
     /// depends only on the modules, so it is computed once per rebind; lookups
@@ -1037,10 +1214,14 @@ impl Resolver<'_> {
         if let Some(result) = self.alias_origin(path, binding, member, seen) {
             return result;
         }
-        if let (Some(constructor), Some(member)) = (&binding.constructed, member)
-            && let Some(result) = self.prototype_member(path, binding, constructor, member, seen)
-        {
-            return result;
+        if let (Some(constructor), Some(member)) = (&binding.constructed, member) {
+            if let Some(result) = self.prototype_member(path, binding, constructor, member, seen) {
+                return result;
+            }
+            if let Some(result) = self.constructed_member(path, binding, constructor, member, seen)
+            {
+                return result;
+            }
         }
         let mut result = if let Some(from) = binding.module.as_deref() {
             match self.module_path(path, from) {
@@ -1443,6 +1624,11 @@ impl Resolver<'_> {
                         .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
                     && !Self::bound(module, &usage.name, usage.location.start_byte))
                     || matches!(result.reason, Some((_, "package_or_unmapped_specifier")))
+                    || self.unfollowed_workspace_package(
+                        path,
+                        &usage.name,
+                        usage.location.start_byte,
+                    )
                     || (usage.member.is_none()
                         && self.required_package(path, &usage.name, usage.location.start_byte))
                 {
@@ -1624,6 +1810,16 @@ impl Resolver<'_> {
         for children in hierarchy.subclasses.values_mut() {
             children.sort();
         }
+        for (path, module) in self.modules {
+            for class in &module.classes {
+                if class.builtin_symbol_keys.iter().any(|key| {
+                    !self.builtin_module(path, &key.specifier)
+                        || hierarchy.assigned.contains(&key.property)
+                }) {
+                    hierarchy.unverified_symbols.insert(class.id.clone());
+                }
+            }
+        }
         hierarchy
     }
     /// Is `name` at `offset` a `require()` binding of a package? Its lexical
@@ -1657,6 +1853,41 @@ impl Resolver<'_> {
                     ..
                 })
             )
+    }
+    /// Is `name` at `offset` an import of a workspace package that is not
+    /// followed (undeclared dependency, unverified version, duplicate name,
+    /// unsupported workspace, or an entry Repogi does not index such as
+    /// `dist/`)? Before workspace packages were modeled such a specifier was a
+    /// package (`package_or_unmapped_specifier`), and a class extending it keeps
+    /// that classification: an unindexed superclass, not a dynamic one.
+    fn unfollowed_workspace_package(&self, path: &str, name: &str, offset: usize) -> bool {
+        let Some(workspace) = self.resolution.workspace.as_ref() else {
+            return false;
+        };
+        let visible: Vec<&Binding> = self.modules[path]
+            .bindings
+            .iter()
+            .filter(|binding| {
+                binding.name == name && binding.scope_start <= offset && offset < binding.scope_end
+            })
+            .collect();
+        let [binding] = visible.as_slice() else {
+            return false;
+        };
+        let Some(specifier) = binding.module.as_deref() else {
+            return false;
+        };
+        let Some((package, _)) = split_package(specifier) else {
+            return false;
+        };
+        !specifier.starts_with('.')
+            && workspace
+                .packages
+                .iter()
+                .any(|member| member.name == package)
+            && self
+                .workspace_package(path, specifier)
+                .is_some_and(|found| found.is_err())
     }
     /// Does the class fact `id` span byte `offset` in its file?
     fn contains(id: &str, offset: usize) -> bool {
@@ -1786,7 +2017,7 @@ impl Resolver<'_> {
                 return fail(Resolution::Unsupported, "prototype_may_be_modified", chain);
             }
             let info = self.classes.get(current.as_str());
-            if info.is_some_and(|info| info.dynamic_members) && (is_static || !is_super) {
+            if self.dynamic_members(&current) && (is_static || !is_super) {
                 return fail(Resolution::Unsupported, "dynamic_own_members", chain);
             }
             // Static fields are own properties of each constructor on the way.
@@ -1872,7 +2103,7 @@ impl Resolver<'_> {
                 } else {
                     &info.instance_fields
                 };
-                if info.dynamic_members {
+                if self.dynamic_members(class) {
                     return fail(Resolution::Unsupported, "dynamic_own_members", chain);
                 }
                 if fields.iter().any(|field| field == member) {
@@ -2153,6 +2384,10 @@ impl Resolver<'_> {
         let fail = |status, rule: &'static str, chain: Vec<String>| {
             Some(Targets::failure(status, rule, chain))
         };
+        if let Some(reason) = &binding.escapes {
+            chain.push(format!("{path}: {} escapes ({reason})", binding.name));
+            return fail(Resolution::Unsupported, "receiver_escapes", chain);
+        }
         if let Some(reason) = &table.dynamic {
             chain.push(format!("{home}: {}.prototype is {reason}", table.name));
             let rule = if reason == "dynamic_own_members" {
@@ -2194,6 +2429,185 @@ impl Resolver<'_> {
             result.dispatch = true;
         }
         Some(result)
+    }
+    /// Any own member name may exist on instances of `class`: computed or
+    /// `Object.assign`-style own members, or an unproven built-in symbol key.
+    fn dynamic_members(&self, class: &str) -> bool {
+        self.classes
+            .get(class)
+            .is_some_and(|info| info.dynamic_members)
+            || self
+                .hierarchy
+                .get()
+                .is_some_and(|hierarchy| hierarchy.unverified_symbols.contains(class))
+    }
+    /// Does `specifier` in `path` name a Node.js built-in module: a bare name no
+    /// path mapping, `baseUrl`, self-reference or workspace package resolves?
+    fn builtin_module(&self, path: &str, specifier: &str) -> bool {
+        matches!(
+            self.module_path(path, specifier),
+            Err(Targets {
+                reason: Some((_, "package_or_unmapped_specifier")),
+                ..
+            })
+        )
+    }
+    /// `x.m` where `const x = new C(…)` and `C` statically names an indexed
+    /// class. The instance is exactly a `C` (no subclass), so the method is
+    /// the first declaration on `C`'s prototype chain, provided nothing can
+    /// put an own property `m` on the instance or change the chain: `x` does
+    /// not escape, no constructor on the chain returns another object, no
+    /// class on it has dynamic or same-named own members or a modified
+    /// prototype, the hierarchy is known, and `m` is not written on an
+    /// untracked receiver. `None` defers to the other binding rules (the
+    /// constructor is not a class).
+    #[allow(clippy::too_many_lines)] // Each early return is one documented safety rule.
+    fn constructed_member(
+        &self,
+        path: &str,
+        binding: &Binding,
+        constructor: &str,
+        member: &str,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Option<Targets> {
+        let (name, namespace_member) = match constructor.split_once('.') {
+            Some((name, member)) => (name, Some(member)),
+            None => (constructor, None),
+        };
+        let resolved = self.local(
+            path,
+            name,
+            namespace_member,
+            binding.location.start_byte,
+            false,
+            seen,
+        );
+        let mut chain = resolved.chain.clone();
+        chain.push(format!(
+            "{path}: {} = new {constructor}(…); {}.{member}",
+            binding.name, binding.name
+        ));
+        let fail = |status, rule: &'static str, chain: Vec<String>| {
+            Some(Targets::failure(status, rule, chain))
+        };
+        let Some(class) = self.is_class(&resolved) else {
+            // A binding that may hold several constructors (`cond ? A : B`).
+            let variable = resolved.status() == Resolution::Resolved
+                && resolved
+                    .ids
+                    .first()
+                    .and_then(|id| self.symbol(id))
+                    .is_some_and(|symbol| symbol.kind == "variable");
+            return variable.then(|| {
+                Targets::failure(
+                    Resolution::Unsupported,
+                    "constructor_not_a_known_class",
+                    chain.clone(),
+                )
+            });
+        };
+        if let Some(reason) = &binding.escapes {
+            chain.push(format!("{path}: {} escapes ({reason})", binding.name));
+            return fail(Resolution::Unsupported, "receiver_escapes", chain);
+        }
+        let hierarchy = self.hierarchy();
+        let mut lineage = vec![class.clone()];
+        let top = loop {
+            let cursor = lineage.last().expect("lineage starts with the class");
+            match hierarchy.supers.get(cursor) {
+                Some(Super::Known(parent)) => {
+                    if lineage.len() >= MAX_HIERARCHY || lineage.contains(parent) {
+                        return fail(
+                            Resolution::Unsupported,
+                            "class_hierarchy_cyclic_or_too_deep",
+                            chain,
+                        );
+                    }
+                    lineage.push(parent.clone());
+                }
+                other => break other.cloned(),
+            }
+        };
+        // Every constructor on the chain runs for `new C()`: each can return
+        // another object or add own properties.
+        for class in &lineage {
+            let info = self.classes.get(class.as_str());
+            if hierarchy.tainted.contains(class) {
+                return fail(Resolution::Unsupported, "prototype_may_be_modified", chain);
+            }
+            if info.is_some_and(|info| info.constructor_returns) {
+                chain.push(format!("{class}: constructor returns a value"));
+                return fail(
+                    Resolution::Unsupported,
+                    "constructor_may_return_object",
+                    chain,
+                );
+            }
+            if self.dynamic_members(class) {
+                return fail(Resolution::Unsupported, "dynamic_own_members", chain);
+            }
+            if info.is_some_and(|info| info.instance_fields.iter().any(|field| field == member)) {
+                chain.push(format!("{class}: own property {member}"));
+                return fail(
+                    Resolution::Unsupported,
+                    "own_property_may_shadow_method",
+                    chain,
+                );
+            }
+        }
+        if top == Some(Super::Unknown) {
+            return fail(Resolution::Unsupported, "dynamic_superclass", chain);
+        }
+        let Some((owner, declared)) = lineage.iter().find_map(|class| {
+            let found = self.declared(class, member, false);
+            (!found.is_empty()).then_some((class, found))
+        }) else {
+            return if top == Some(Super::External) {
+                fail(
+                    Resolution::Unresolved,
+                    "inherited_from_unindexed_class",
+                    chain,
+                )
+            } else {
+                fail(
+                    Resolution::Unresolved,
+                    "member_not_declared_in_class_hierarchy",
+                    chain,
+                )
+            };
+        };
+        chain.push(format!("{owner}: declares {member}"));
+        if hierarchy.assigned.contains(member) {
+            chain.push(format!("{member} is assigned on an untracked receiver"));
+            return fail(Resolution::Unsupported, "member_assigned_elsewhere", chain);
+        }
+        let concrete: BTreeSet<String> = declared
+            .iter()
+            .filter(|symbol| !symbol.signature_only)
+            .map(|symbol| symbol.id.clone())
+            .collect();
+        if concrete.is_empty() {
+            return fail(
+                Resolution::Unresolved,
+                "abstract_or_signature_only_member",
+                chain,
+            );
+        }
+        let ambiguous = concrete.len() > 1;
+        Some(Targets {
+            ids: concrete,
+            chain,
+            reason: Some(if ambiguous {
+                (Resolution::Ambiguous, "multiple_static_targets")
+            } else {
+                (
+                    Resolution::Resolved,
+                    "constructed_instance_static_declaration",
+                )
+            }),
+            dispatch: !ambiguous,
+            ..Targets::default()
+        })
     }
     /// `const v = w` / `const v = w.p`: when the origin is a source-backed
     /// implementation (function, method, class), a module or an object table,
@@ -2248,6 +2662,32 @@ impl Resolver<'_> {
                 .unwrap_or_default()
         );
         if !implementation {
+            // `const b = a` where `a = new C()`: a member use of `b` is a member
+            // use of the same instance (its escapes and writes are `a`'s too).
+            if let Some(member) = member
+                && alias.member.is_none()
+                && origin.status() == Resolution::Resolved
+                && binding.escapes.is_none()
+                && !seen.contains(&key)
+            {
+                seen.insert(key.clone());
+                let mut through = self.local(
+                    path,
+                    &alias.name,
+                    Some(member),
+                    binding.location.start_byte,
+                    false,
+                    seen,
+                );
+                seen.remove(&key);
+                if through.dispatch && through.status() == Resolution::Resolved {
+                    through.chain.push(format!(
+                        "{path}: {} = {} (alias of the instance)",
+                        binding.name, alias.name
+                    ));
+                    return Some(through);
+                }
+            }
             // A member use through an alias reports why its origin failed.
             if member.is_some() && origin.status() != Resolution::Resolved {
                 let mut origin = origin;
@@ -2831,4 +3271,187 @@ fn join(base: &str, relative: &str) -> Option<String> {
         }
     }
     Some(parts.join("/"))
+}
+
+/// Is `path` the directory `dir` or below it (`""` is the root)?
+fn inside(dir: &str, path: &str) -> bool {
+    dir.is_empty() || path == dir || path.starts_with(&format!("{dir}/"))
+}
+
+/// `package.json` in `dir` (`""` is the root).
+fn manifest(dir: &str) -> String {
+    if dir.is_empty() {
+        "package.json".to_owned()
+    } else {
+        format!("{dir}/package.json")
+    }
+}
+
+fn index_files(dir: &str) -> Vec<String> {
+    ["js", "jsx", "mjs", "cjs", "ts", "tsx"]
+        .iter()
+        .map(|ext| {
+            if dir.is_empty() {
+                format!("index.{ext}")
+            } else {
+                format!("{dir}/index.{ext}")
+            }
+        })
+        .collect()
+}
+
+fn conditions(chosen: &[String]) -> String {
+    if chosen.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", chosen.join(", "))
+    }
+}
+
+/// `./`-relative, without `..` or `node_modules`, joined under the package.
+fn package_target(scope: &str, path: &str) -> Option<String> {
+    let valid = path.starts_with("./")
+        && !path
+            .split('/')
+            .any(|part| matches!(part, ".." | "node_modules"));
+    valid.then(|| join(scope, path)).flatten()
+}
+
+/// `@scope/name/sub` -> (`@scope/name`, `sub`); `name/sub` -> (`name`, `sub`).
+fn split_package(specifier: &str) -> Option<(&str, Option<&str>)> {
+    let split = if specifier.starts_with('@') {
+        let first = specifier.find('/')?;
+        specifier[first + 1..]
+            .find('/')
+            .map(|second| first + 1 + second)
+    } else {
+        specifier.find('/')
+    };
+    match split {
+        Some(at) if at + 1 < specifier.len() => {
+            Some((&specifier[..at], Some(&specifier[at + 1..])))
+        }
+        Some(_) => None,
+        None => Some((specifier, None)),
+    }
+}
+
+/// Does a dependency specifier select the local workspace member? The
+/// `workspace:` protocol always does (pnpm and Yarn refuse otherwise); `*`
+/// and the empty range accept any version; an exact version, or `^`, `~`
+/// and `>=` of exactly the member's version, include it; `file:`/`link:`
+/// must name the member directory. Anything else may install a registry copy.
+fn satisfies(spec: &str, member: &WorkspacePackage, scope: &str) -> bool {
+    let spec = spec.trim();
+    if spec.starts_with("workspace:") || spec == "*" || spec.is_empty() {
+        return true;
+    }
+    if let Some(path) = spec
+        .strip_prefix("file:")
+        .or_else(|| spec.strip_prefix("link:"))
+    {
+        return join(scope, path).is_some_and(|dir| dir == member.dir);
+    }
+    let Some(version) = member.version.as_deref() else {
+        return false;
+    };
+    let range = ["^", "~", ">=", "="]
+        .iter()
+        .find_map(|prefix| spec.strip_prefix(prefix))
+        .unwrap_or(spec);
+    range.trim() == version
+}
+
+/// Walk an `exports` value for `subpath` in declaration order. A condition in
+/// `accepted` or `default` is taken; `skipped` ones are passed over; any other
+/// condition before a match makes the choice tool dependent.
+fn exports_path<'e>(
+    exports: &'e ExportsTarget,
+    subpath: &str,
+    accepted: &[&str],
+    skipped: &[&str],
+) -> Result<(&'e str, Vec<String>), (Resolution, &'static str, String)> {
+    let mut current = match exports {
+        ExportsTarget::Subpaths(entries) => match entries.iter().find(|(key, _)| key == subpath) {
+            Some((_, target)) => target,
+            None if entries.iter().any(|(key, _)| key.contains('*')) => {
+                return Err((
+                    Resolution::Unsupported,
+                    "package_exports_pattern",
+                    format!("exports {subpath} only matches a pattern"),
+                ));
+            }
+            None => {
+                return Err((
+                    Resolution::Unresolved,
+                    "package_subpath_not_exported",
+                    format!("exports has no {subpath}"),
+                ));
+            }
+        },
+        other if subpath == "." => other,
+        _ => {
+            return Err((
+                Resolution::Unresolved,
+                "package_subpath_not_exported",
+                format!("exports has no {subpath}"),
+            ));
+        }
+    };
+    let mut chosen = Vec::new();
+    for _ in 0..16 {
+        match current {
+            ExportsTarget::Conditions(entries) => {
+                let mut next = None;
+                for (key, value) in entries {
+                    if accepted.contains(&key.as_str()) || key == "default" {
+                        next = Some((key, value));
+                        break;
+                    }
+                    if !skipped.contains(&key.as_str()) {
+                        return Err((
+                            Resolution::Unsupported,
+                            "conditional_exports_tool_dependent",
+                            format!(
+                                "exports {subpath} condition {key} precedes {}/default",
+                                accepted.join("/")
+                            ),
+                        ));
+                    }
+                }
+                let Some((key, value)) = next else {
+                    return Err((
+                        Resolution::Unresolved,
+                        "package_subpath_not_exported",
+                        format!(
+                            "exports {subpath} has no {}/default condition",
+                            accepted.join("/")
+                        ),
+                    ));
+                };
+                chosen.push(key.clone());
+                current = value;
+            }
+            ExportsTarget::Path(path) => return Ok((path, chosen)),
+            ExportsTarget::Null => {
+                return Err((
+                    Resolution::Unresolved,
+                    "package_subpath_not_exported",
+                    format!("exports {subpath} is null"),
+                ));
+            }
+            ExportsTarget::Subpaths(_) | ExportsTarget::Unsupported(_) => {
+                return Err((
+                    Resolution::Unsupported,
+                    "package_exports_unsupported",
+                    format!("exports {subpath} has an unsupported shape"),
+                ));
+            }
+        }
+    }
+    Err((
+        Resolution::Unsupported,
+        "package_exports_unsupported",
+        "exports nesting too deep".into(),
+    ))
 }

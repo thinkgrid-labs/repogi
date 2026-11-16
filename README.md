@@ -35,7 +35,7 @@ curl -fsSL https://github.com/thinkgrid-labs/repogi/releases/latest/download/ins
 repogi --version
 ```
 
-> **Release status:** 0.1.2 is the latest release: TypeScript, TSX, JavaScript and JSX indexing, code intelligence, project knowledge, `knowledge trace`, `investigate`, project memory and the `init`, `doctor` and `agent add` commands. The next release, 0.1.4, is in source and not yet published: `this`/`super` methods, static CommonJS, callable values, object and prototype methods, alias origins and local `package.json` entry points for JavaScript ([accuracy](docs/STATIC_ANALYSIS_ACCURACY.md)). Windows is not supported yet. See [installation](docs/DEVELOPER_PREVIEW_INSTALLATION.md) for verification options and [release assets](docs/RELEASES.md).
+> **Release status:** 0.1.2 is the latest release: TypeScript, TSX, JavaScript and JSX indexing, code intelligence, project knowledge, `knowledge trace`, `investigate`, project memory and the `init`, `doctor` and `agent add` commands. The next release, 0.1.3, is in source and not yet published: `this`/`super` methods, static CommonJS, callable values, object and prototype methods, `new C()` receivers, alias origins, local `package.json` entry points and workspace packages ([accuracy](docs/STATIC_ANALYSIS_ACCURACY.md), [workspaces](docs/WORKSPACE_INTELLIGENCE.md)). Windows is not supported yet. See [installation](docs/DEVELOPER_PREVIEW_INSTALLATION.md) for verification options and [release assets](docs/RELEASES.md).
 
 ### Build from source
 
@@ -80,7 +80,8 @@ Indexing is explicit and incremental. Rerun `repogi index .` after edits; unchan
 | What did we already decide, and is it still supported? | `repogi memory search "session storage"` | `atlas_memory` (opt-in, read-only) | 0.1.1 |
 | Is my setup healthy, and how do I connect an agent? | `repogi init`, `repogi doctor`, `repogi agent add claude` | — | 0.1.2 |
 | The same questions for JavaScript and JSX code | all of the above | all of the above | 0.1.2 |
-| Which implementation does a CommonJS, object or prototype call reach? | `repogi graph`, `repogi context` | `atlas_references`, `atlas_dependencies` | source |
+| Which implementation does a CommonJS, object, prototype or `new C()` call reach? | `repogi graph`, `repogi context` | `atlas_references`, `atlas_dependencies` | source |
+| What does an import of a local workspace package (`@acme/session`) reach? | `repogi graph`, `repogi impact` | `atlas_references`, `atlas_impact` | source |
 
 *Release* is the first release that includes the capability; *source* means build from source until the next release.
 
@@ -273,7 +274,7 @@ Most commands only read. `repogi init` writes only `.code-intel/.gitignore`, `re
 | Area | Current scope |
 | --- | --- |
 | **Languages** | TypeScript (`.ts`, `.tsx`, `.mts`, `.cts`) and, in source builds, JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`). Python, Rust and other languages are not indexed. A query with no matches says that other languages were not searched. |
-| **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. In source builds, static `require`/`module.exports`, `this.m()`/`super.m()`, object-literal and prototype methods, alias origins and local `package.json` `main`/`exports` resolve when no override, shadowing, escape or dynamic write can redirect them ([accuracy](docs/STATIC_ANALYSIS_ACCURACY.md)). Packages in `node_modules`, dynamic CommonJS, receivers of unknown type, overridden instance methods and dynamic `import()` stay unconfirmed. |
+| **Resolution** | Relative imports, `tsconfig`/`jsconfig` paths and `baseUrl`, re-exports and barrel files. In source builds, static `require`/`module.exports`, `this.m()`/`super.m()`, object-literal and prototype methods, methods of `new C()` instances, alias origins, local `package.json` `main`/`exports` and declared workspace packages resolve when no override, shadowing, escape or dynamic write can redirect them ([accuracy](docs/STATIC_ANALYSIS_ACCURACY.md), [workspaces](docs/WORKSPACE_INTELLIGENCE.md)). Packages in `node_modules`, dynamic CommonJS, receivers of unknown type, overridden instance methods and dynamic `import()` stay unconfirmed. |
 | **Parser** | Tree-sitter TypeScript grammar 0.23.2 has known syntax gaps ([details](docs/TYPESCRIPT_GRAMMAR_LIMITATIONS.md)); the JavaScript grammar (0.23.1) does not parse Flow annotations, so such files are indexed as partial. |
 | **Project knowledge** | Markdown only, with local lexical section search. Documents record intent and do not prove code behavior. |
 | **Project memory** | Explicitly proposed and reviewed claims only. Verification checks cited bytes and identities, not truth. Search is lexical. Reviewer names are self-reported labels, not authenticated identities, and export digests are integrity checks, not signatures. Back up with `repogi memory export`. |
@@ -317,7 +318,7 @@ Nothing. Memories live in `.repogi/memory.db`. Without an index they still read,
 
 ## Roadmap
 
-Next come the 0.1.4 release (deeper JavaScript analysis) and the first measured runs of the [agent outcome benchmark](docs/AGENT_OUTCOMES.md). The [public roadmap](ROADMAP.md) lists priorities, status and completion criteria.
+Next come the 0.1.3 release (deeper JavaScript analysis and workspace packages) and the first measured runs of the [agent outcome benchmark](docs/AGENT_OUTCOMES.md). The [public roadmap](ROADMAP.md) lists priorities, status and completion criteria.
 
 ## Documentation and contributing
 
