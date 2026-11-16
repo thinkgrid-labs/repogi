@@ -1,0 +1,9 @@
+{
+  "name": "@acme/session",
+  "version": "1.2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./tokens": "./src/tokens.js"
+  }
+}

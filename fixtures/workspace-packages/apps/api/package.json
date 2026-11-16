@@ -1,0 +1,1 @@
+{ "name": "api", "private": true, "dependencies": { "@acme/core": "2.0.0", "@acme/session": "workspace:*" } }

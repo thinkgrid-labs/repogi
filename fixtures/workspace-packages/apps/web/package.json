@@ -1,0 +1,12 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@acme/session": "workspace:*",
+    "@acme/core": "^2.0.0",
+    "@acme/dup": "*",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": { "@acme/legacy": "^9.0.0" }
+}

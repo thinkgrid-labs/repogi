@@ -1,0 +1,1 @@
+{ "name": "admin", "private": true, "dependencies": { "@acme/typed": "workspace:*", "@acme/built": "workspace:*", "@acme/session": "workspace:^" } }

@@ -29,7 +29,7 @@ The rules come from the TypeScript handbook:
 | Directories Repogi never reads | Visible to TypeScript. | A mapping into `node_modules`, `dist`, `build`, `coverage`, `.next`, `generated`, `.git` or `.code-intel` is unsupported. |
 
 **Not supported, so reported explicitly rather than guessed:**
-- package resolution (`node_modules`), and for TypeScript importers package.json `main`/`exports`/`imports`/`typesVersions` (JavaScript importers: [package entry points](#package-entry-points));
+- package resolution (`node_modules`), and for TypeScript importers package.json `main`/`exports`/`imports`/`typesVersions` outside declared workspace packages (JavaScript importers: [package entry points](#package-entry-points); workspaces: [workspace packages](WORKSPACE_INTELLIGENCE.md));
 - `moduleSuffixes`, `moduleResolution: classic`, `rootDirs`, `customConditions`;
 - project references, and `include`/`exclude` membership;
 - files hidden by `.gitignore`. These are treated as absent, so a mapping that depends on ignored generated files can fall through to a later substitution.
@@ -41,9 +41,9 @@ TypeScript's candidate order is one tool's choice. For a file in `.js`, `.jsx`, 
 | Specifier | Repogi |
 |---|---|
 | With an extension (`./a.js`, `./b.mjs`, `./c.jsx`, `./d.ts`) | Exactly that file. If it does not exist, the TypeScript source compiled to that name: `a.js` → `a.ts`/`a.tsx`, `b.mjs` → `b.mts`, `c.cjs` → `c.cts` (several candidates: **ambiguous**). An existing `a.js` always wins over `a.ts`. |
-| Without an extension (`./a`, and `.`/`..`) | Files first: `a.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`. Exactly one must exist; two or more (for example `a.js` beside `a.ts` or `a.mjs`) are **ambiguous**. Only when no file exists, the directory: its `package.json` `main` when it has one ([package entry points](#package-entry-points)), otherwise exactly one `a/index.*`. Bare `.` and `..` are relative, as in Node.js (0.1.4; `require("..")` previously fell through to package lookup). |
+| Without an extension (`./a`, and `.`/`..`) | Files first: `a.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`. Exactly one must exist; two or more (for example `a.js` beside `a.ts` or `a.mjs`) are **ambiguous**. Only when no file exists, the directory: its `package.json` `main` when it has one ([package entry points](#package-entry-points)), otherwise exactly one `a/index.*`. Bare `.` and `..` are relative, as in Node.js (0.1.3; `require("..")` previously fell through to package lookup). |
 | JSON (`./data.json`, or `./data` with only `data.json`) | Not tracked; **unresolved**. |
-| Bare (`react`, `@scope/pkg`) | `jsconfig`/`tsconfig` `paths` and `baseUrl` as above, then the importing file's own package through `exports` ([self-reference](#package-entry-points)), then **unsupported** (`package_or_unmapped_specifier`). |
+| Bare (`react`, `@scope/pkg`) | `jsconfig`/`tsconfig` `paths` and `baseUrl` as above, then the importing file's own package through `exports` ([self-reference](#package-entry-points)), then a declared local [workspace package](WORKSPACE_INTELLIGENCE.md) (0.1.3), then **unsupported** (`package_or_unmapped_specifier`). |
 | `require('./a')` | In a CommonJS file (`.cjs`, or `.js`/`.jsx` without ES module syntax and not under `"type": "module"`), a literal specifier binds like an import, with the same lookup ([CommonJS](STATIC_ANALYSIS_ACCURACY.md#commonjs)). The `require(...)` call itself stays **unresolved**. |
 | `import('./a')` | Not an import binding. The call stays **unresolved** (no binding named `import`). |
 
@@ -51,7 +51,7 @@ These are static claims about which file a specifier names. They say nothing abo
 
 ## Package entry points
 
-0.1.4, JavaScript importers only. `package.json` files inside the repository are read as data, with the same rules as configs: regular files only (never through symlinks), inside the root, size-capped; nothing is installed, downloaded or executed. Their entry fields are part of the resolution fingerprint, so editing them rebinds without reparsing.
+Internal 0.1.4 (released in 0.1.3), JavaScript importers only. `package.json` files inside the repository are read as data, with the same rules as configs: regular files only (never through symlinks), inside the root, size-capped; nothing is installed, downloaded or executed. Their entry fields are part of the resolution fingerprint, so editing them rebinds without reparsing.
 
 **Directory imports** (`require("./pkg")`, `require("..")`) follow Node.js `LOAD_AS_DIRECTORY`:
 
@@ -72,7 +72,7 @@ These are static claims about which file a specifier names. They say nothing abo
 - The target must be `./`-relative without `..` or `node_modules` (`invalid_package_target`) and names exactly that file: no extension or `index` search. A target in `dist/`, `build/` and other directories Repogi never reads is unsupported like any other excluded path.
 - Fallback arrays, objects mixing subpaths and conditions, and nesting beyond 8 levels or 1,024 entries are **unsupported** (`package_exports_unsupported`).
 
-Packages in `node_modules`, workspace packages imported by name from another package, and `imports` (`#internal`) are not followed.
+Workspace packages imported by name follow the same `exports` rules, or `main`/`index` without `exports`, and TypeScript importers need every `moduleResolution` mode to agree ([workspace packages](WORKSPACE_INTELLIGENCE.md), 0.1.3). Packages in `node_modules` and `imports` (`#internal`) are not followed.
 
 ## Statuses and rules
 
@@ -89,6 +89,7 @@ Non-resolved module outcomes carry a specific `evidence.rule`. Edges that bind t
 | `invalid_package_entry` | unsupported | A directory's `package.json` cannot be read as data. |
 | `package_exports_pattern`, `conditional_exports_tool_dependent`, `invalid_package_target`, `package_exports_unsupported` | unsupported | A self-reference through `exports` that Repogi does not choose for the tools. |
 | `package_subpath_not_exported` | unresolved | The package's `exports` has no such subpath (or it is `null`). |
+| `invalid_workspace_configuration`, `duplicate_workspace_package`, `workspace_dependency_not_declared`, `workspace_dependency_version_unverified`, `workspace_entry_tool_dependent` | unsupported | A bare specifier names a [workspace package](WORKSPACE_INTELLIGENCE.md) that is not followed: an unsupported declaration, a name two members share, a dependency the importer does not declare or whose version may install a registry copy, or TypeScript resolution modes that disagree. |
 | `path_mapping_outside_repository` | unsupported | A substitution (or `*` capture such as `@/../x`) leaves the root. |
 | `path_mapping_into_excluded_directory`, `module_in_excluded_directory` | unsupported | The candidate lies in a directory the indexer never reads. |
 | `base_url_outside_repository` | unsupported | `baseUrl` is outside the root. |
@@ -109,7 +110,7 @@ Skipped substitutions appear as `-> ./missing/* (no module)`. Evidence for relat
 1. `index` reads every `tsconfig.json`/`jsconfig.json` the walker can see. Configs are size-capped, must be regular files inside the root, and are never followed through symlinks.
 2. It builds a resolution context: per-directory effective `baseUrl`/`paths`, or an error, plus the set of module files a resolver could select.
 3. The context's BLAKE3 fingerprint is stored in the index metadata.
-4. When the fingerprint differs from the indexed one, Repogi **rebinds every cached module from its stored syntax IR without reparsing any source**. That happens when a config is edited, added, deleted or becomes invalid, or when a JavaScript or `package.json` file appears. The rebind happens in the same transaction as the revision bump, and the report sets `resolution_changed: true`.
+4. When the fingerprint differs from the indexed one, Repogi **rebinds every cached module from its stored syntax IR without reparsing any source**. That happens when a config is edited, added, deleted or becomes invalid, when a JavaScript or `package.json` file appears, or when a workspace declaration, member name, version, `types` field or dependency on a member changes. The rebind happens in the same transaction as the revision bump, and the report sets `resolution_changed: true`.
 5. Warm runs with an unchanged fingerprint rebuild nothing. A failed update rolls back.
 6. MCP `atlas_status` recomputes the fingerprint, so a config-only edit shows as `fresh: false` with `freshness.resolution_changed: true`.
 7. Re-index explicitly after changing source or resolution settings.

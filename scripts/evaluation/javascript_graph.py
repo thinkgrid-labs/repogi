@@ -18,6 +18,12 @@ is asked for the definition at:
     implementation other than the claimed declaration (no override a runtime
     dispatch could select).
 
+Constructed-receiver edges in TypeScript files (`const x = new C(); x.m()`,
+rule `constructed_instance_static_declaration`, resolved there since the
+0.1.3 release) are checked the same way and reported separately under
+`typescript_constructed_receivers`, so the JavaScript metrics keep their
+earlier definition.
+
 Alias-origin edges (`const v = obj.m; v()` resolved to the origin) are also
 checked at each alias initializer named in their evidence chain, because the
 definition TypeScript reports at a use is the local alias itself.
@@ -189,10 +195,15 @@ def main():
                 # Only static names (`f`, `a.b`, `this.m`); a callee that is
                 # itself a call or index expression has no declaration to find.
                 recall_sites.append(site)
+        ts_edges = [e for e in edges if not e['location']['path'].endswith(JS)
+                    and e['status'] == 'resolved'
+                    and e['evidence']['rule'] == 'constructed_instance_static_declaration']
+        ts_sites = [{'key': f'ts:{i}', 'path': e['location']['path'], 'byte': site_byte(e), 'implementations': True}
+                    for i, e in enumerate(ts_edges)]
         sites_file = Path(tmp) / 'sites.json'
         oracle_file = Path(tmp) / 'oracle.mjs'
         oracle_file.write_text(ORACLE)
-        sites_file.write_text(json.dumps(precision_sites + recall_sites + alias_sites))
+        sites_file.write_text(json.dumps(precision_sites + recall_sites + alias_sites + ts_sites))
         started = time.monotonic()
         subprocess.run(['node', str(oracle_file), str(root), str(sites_file), str(args.typescript.resolve())],
                        check=True, timeout=3600, cwd=tmp)
@@ -204,6 +215,18 @@ def main():
         # implementation search names every in-corpus override a runtime
         # dispatch could select; more than the claimed one is a dispatch conflict.
         dispatch_single, dispatch_conflicts = 0, []
+        ts_agree, ts_disagree, ts_conflicts = 0, [], []
+        for i, e in enumerate(ts_edges):
+            path, start, end = parse_id(e['target_id'])
+            inside = lambda d: not d.get('external') and d['path'] == path and start <= d['byte'] < end
+            if any(inside(d) for d in answers.get(f'ts:{i}', [])):
+                ts_agree += 1
+            else:
+                ts_disagree.append((e, answers.get(f'ts:{i}', [])))
+            others = [d for d in implementations.get(f'ts:{i}', []) if not d.get('external') and not inside(d)]
+            if others:
+                ts_conflicts.append((e, others))
+        implementations = {k: v for k, v in implementations.items() if not str(k).startswith('ts:')}
         for key, found in implementations.items():
             e = js_edges[key]
             path, start, end = parse_id(e['target_id'])
@@ -311,6 +334,13 @@ def main():
                                       {'site': f"{e['location']['path']}:{e['location']['start_line']}",
                                        'syntax': e['evidence']['syntax'][:80], 'repogi': e['target_id'], 'typescript': o[:4]}
                                       for e, o in dispatch_conflicts[:args.max_review]]},
+            'typescript_constructed_receivers': {
+                'checked': len(ts_edges), 'agree': ts_agree, 'disagree': len(ts_disagree),
+                'other_implementations': len(ts_conflicts),
+                'for_review': [
+                    {'site': f"{e['location']['path']}:{e['location']['start_line']}",
+                     'syntax': e['evidence']['syntax'][:80], 'repogi': e['target_id'], 'typescript': d[:4]}
+                    for e, d in (ts_disagree + ts_conflicts)[:args.max_review]]},
             'disagreements_for_review': [
                 {'site': f"{e['location']['path']}:{e['location']['start_line']}", 'kind': e['kind'],
                  'syntax': e['evidence']['syntax'][:80], 'repogi': e['target_id'], 'typescript': defs}
@@ -323,7 +353,8 @@ def main():
     if args.output:
         args.output.write_text(text + '\n')
     print(json.dumps({k: result[k] for k in ('files', 'timing_s', 'index_bytes', 'precision', 'recall_calls',
-                                             'recall_calls_fixed_model', 'alias_origins', 'instance_dispatch')}, indent=1))
+                                             'recall_calls_fixed_model', 'alias_origins', 'instance_dispatch',
+                                             'typescript_constructed_receivers')}, indent=1))
 
 
 if __name__ == '__main__':

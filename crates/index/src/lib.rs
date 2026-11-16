@@ -7,6 +7,7 @@ pub mod snapshot;
 mod source;
 mod syntax;
 mod tsconfig;
+mod workspace;
 
 use std::{
     collections::{BTreeMap, BTreeSet},

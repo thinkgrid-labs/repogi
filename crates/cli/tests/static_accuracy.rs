@@ -118,6 +118,7 @@ fn instance(edge: &Value) -> bool {
     text.starts_with("this.")
         || text.starts_with("super.")
         || edge["evidence"]["rule"] == "prototype_method_static_declaration"
+        || edge["evidence"]["rule"] == "constructed_instance_static_declaration"
 }
 
 fn check_labels(name: &str) {
@@ -219,6 +220,16 @@ fn commonjs_matches_labels() {
     check_labels("commonjs");
 }
 
+#[test]
+fn receiver_intelligence_matches_labels() {
+    check_labels("receiver-intelligence");
+}
+
+#[test]
+fn workspace_packages_match_labels() {
+    check_labels("workspace-packages");
+}
+
 /// Sorted edge JSON, for comparing two graphs.
 fn canonical(root: &Path) -> Vec<String> {
     let mut edges: Vec<String> = graph(root).iter().map(Value::to_string).collect();
@@ -230,7 +241,13 @@ fn canonical(root: &Path) -> Vec<String> {
 /// give exactly the graph a fresh index of the edited tree gives.
 #[test]
 fn incremental_index_reproduces_fresh_index() {
-    for name in ["instance-dispatch", "commonjs", "javascript-intelligence"] {
+    for name in [
+        "instance-dispatch",
+        "commonjs",
+        "javascript-intelligence",
+        "receiver-intelligence",
+        "workspace-packages",
+    ] {
         let (_temp, root) = copy(name);
         json(&root, &["index", "."]);
         if name == "instance-dispatch" {
@@ -268,6 +285,45 @@ fn incremental_index_reproduces_fresh_index() {
                 objects.replace("register(a);", "register();"),
             )
             .unwrap();
+        } else if name == "receiver-intelligence" {
+            // A computed key becomes a well-known symbol and a receiver stops
+            // escaping: instances in the same and other modules follow.
+            let classes = fs::read_to_string(root.join("lib/classes.js")).unwrap();
+            fs::write(
+                root.join("lib/classes.js"),
+                classes.replace("this[key] = 1;", "this[Symbol.iterator] = key;"),
+            )
+            .unwrap();
+            let negative = fs::read_to_string(root.join("lib/negative.js")).unwrap();
+            fs::write(
+                root.join("lib/negative.js"),
+                negative.replace("consume(e);\n", "consume();\n"),
+            )
+            .unwrap();
+        } else if name == "workspace-packages" {
+            // Only manifests change: a package is renamed, a duplicate is
+            // excluded from the workspace, and a dependency range now selects
+            // the local package. Importers rebind without being reparsed.
+            fs::write(
+                root.join("packages/core/package.json"),
+                "{ \"name\": \"@acme/kernel\", \"version\": \"2.0.0\", \"main\": \"./lib/core.js\" }",
+            )
+            .unwrap();
+            let manifest = fs::read_to_string(root.join("package.json")).unwrap();
+            fs::write(
+                root.join("package.json"),
+                manifest.replace(
+                    "[\"packages/*\", \"apps/*\"]",
+                    "[\"packages/*\", \"!packages/dup-b\", \"apps/*\"]",
+                ),
+            )
+            .unwrap();
+            let web = fs::read_to_string(root.join("apps/web/package.json")).unwrap();
+            fs::write(
+                root.join("apps/web/package.json"),
+                web.replace("\"^9.0.0\"", "\"workspace:*\""),
+            )
+            .unwrap();
         } else {
             let path = root.join("lib/conditional.js");
             fs::write(&path, "function a() { return 1; }\nexports.a = a;\n").unwrap();
@@ -278,7 +334,11 @@ fn incremental_index_reproduces_fresh_index() {
             .unwrap();
         }
         let report = json(&root, &["index", "."]);
-        assert!(report["files_changed"].as_u64().unwrap() >= 1, "{report}");
+        if name == "workspace-packages" {
+            assert_eq!(report["resolution_changed"], true, "{report}");
+        } else {
+            assert!(report["files_changed"].as_u64().unwrap() >= 1, "{report}");
+        }
         let incremental = canonical(&root);
         let (_fresh_temp, fresh) = copy(name);
         for file in [
@@ -288,6 +348,10 @@ fn incremental_index_reproduces_fresh_index() {
             "lib/patch.js",
             "package.json",
             "lib/objects-dynamic.js",
+            "lib/classes.js",
+            "lib/negative.js",
+            "packages/core/package.json",
+            "apps/web/package.json",
         ] {
             if root.join(file).exists() {
                 fs::copy(root.join(file), fresh.join(file)).unwrap();
@@ -316,6 +380,30 @@ fn incremental_index_reproduces_fresh_index() {
                         .as_str()
                         .is_some_and(|id| id.contains("lib/browser.js"))
             }));
+        } else if name == "receiver-intelligence" {
+            assert!(resolved("lib/classes.js", "r5.turn"));
+            assert!(resolved("lib/negative.js", "e.close"));
+        } else if name == "workspace-packages" {
+            for text in ["dup", "old"] {
+                assert!(edges.iter().any(|edge| {
+                    edge["location"]["path"] == "apps/web/src/app.js"
+                        && edge["kind"] == "IMPORTS"
+                        && edge["target_text"] == text
+                        && edge["status"] == "resolved"
+                }));
+            }
+            let core = edges
+                .iter()
+                .find(|edge| {
+                    edge["location"]["path"] == "apps/api/server.js"
+                        && edge["kind"] == "IMPORTS"
+                        && edge["target_text"] == "Core"
+                })
+                .unwrap();
+            assert_eq!(
+                core["evidence"]["rule"], "package_or_unmapped_specifier",
+                "a renamed package is no longer the dependency's identity: {core}"
+            );
         } else {
             assert!(resolved("app/main.js", "cond.a"));
             assert!(
@@ -533,4 +621,316 @@ fn javascript_adversarial_inputs_stay_bounded() {
         !serde_json::to_string(&edges).unwrap().contains("passwd"),
         "an outside path leaked into evidence"
     );
+}
+
+/// Indexes a tree written by `build` and returns its graph edges.
+fn indexed(build: impl FnOnce(&Path)) -> (TempDir, Vec<Value>) {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    build(&root);
+    json(&root, &["index", "."]);
+    let edges = graph(&root);
+    (temp, edges)
+}
+
+fn write(root: &Path, file: &str, text: &str) {
+    let path = root.join(file);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+fn import_rule(edges: &[Value], path: &str, text: &str) -> (String, String) {
+    let edge = edges
+        .iter()
+        .find(|edge| {
+            edge["location"]["path"] == path
+                && edge["kind"] == "IMPORTS"
+                && edge["target_text"] == text
+        })
+        .unwrap_or_else(|| panic!("no import {text} in {path}"));
+    (
+        edge["status"].as_str().unwrap().to_owned(),
+        edge["evidence"]["rule"].as_str().unwrap().to_owned(),
+    )
+}
+
+/// A consumer of `@x/a` in a workspace whose root declaration is `workspaces`.
+fn workspace_tree(root: &Path, workspaces: &str) {
+    write(
+        root,
+        "package.json",
+        &format!("{{ \"private\": true, \"workspaces\": {workspaces} }}"),
+    );
+    write(
+        root,
+        "packages/a/package.json",
+        "{ \"name\": \"@x/a\", \"version\": \"1.0.0\" }",
+    );
+    write(
+        root,
+        "packages/a/index.js",
+        "exports.a = function a() {};\n",
+    );
+    write(
+        root,
+        "apps/use/package.json",
+        "{ \"dependencies\": { \"@x/a\": \"workspace:*\" } }",
+    );
+    write(
+        root,
+        "apps/use/main.js",
+        "const a = require('@x/a');\na.a();\n",
+    );
+}
+
+/// Workspace declarations Repogi cannot evaluate exactly never resolve a
+/// package by name, and nothing outside the root is read: symlinked and
+/// malformed members, unsupported glob syntax, out-of-root patterns, huge
+/// pattern lists, unsupported YAML, traversal in names and targets, and a
+/// re-export cycle between two packages.
+#[test]
+#[allow(clippy::too_many_lines)] // One tree per adversarial declaration.
+fn workspace_adversarial_inputs_stay_bounded() {
+    let (_ok, edges) = indexed(|root| workspace_tree(root, "[\"packages/*\"]"));
+    assert_eq!(
+        import_rule(&edges, "apps/use/main.js", "a"),
+        ("resolved".into(), "commonjs_require_binding".into())
+    );
+    let outside = TempDir::new().unwrap();
+    write(
+        outside.path(),
+        "package.json",
+        "{ \"name\": \"@x/evil\", \"main\": \"../../etc/passwd\" }",
+    );
+    let unsupported = |build: &dyn Fn(&Path)| {
+        let (_temp, edges) = indexed(|root| build(root));
+        let (status, rule) = import_rule(&edges, "apps/use/main.js", "a");
+        assert_eq!(status, "unsupported", "{rule}");
+        assert!(
+            !serde_json::to_string(&edges).unwrap().contains("passwd"),
+            "an outside path leaked into evidence"
+        );
+        rule
+    };
+    #[cfg(unix)]
+    assert_eq!(
+        unsupported(&|root| {
+            workspace_tree(root, "[\"packages/*\"]");
+            std::os::unix::fs::symlink(outside.path(), root.join("packages/evil")).unwrap();
+        }),
+        "invalid_workspace_configuration"
+    );
+    assert_eq!(
+        unsupported(&|root| {
+            workspace_tree(root, "[\"packages/*\"]");
+            write(root, "packages/b/package.json", "{ \"name\": ");
+        }),
+        "invalid_workspace_configuration"
+    );
+    for patterns in [
+        "[\"packages/*\", \"packages/{a,b}\"]",
+        "[\"packages/*\", \"../outside/*\"]",
+        "[\"packages/*\", 7]",
+    ] {
+        assert_eq!(
+            unsupported(&|root| workspace_tree(root, patterns)),
+            "invalid_workspace_configuration",
+            "{patterns}"
+        );
+    }
+    // Nothing evaluable: the name is not known to be local, so it stays a package.
+    assert_eq!(
+        unsupported(&|root| workspace_tree(root, "{ \"nohoist\": [] }")),
+        "package_or_unmapped_specifier"
+    );
+    let many: Vec<String> = (0..300).map(|i| format!("\"p{i}\"")).collect();
+    assert_eq!(
+        unsupported(&|root| {
+            workspace_tree(root, &format!("[\"packages/*\", {}]", many.join(",")));
+        }),
+        "invalid_workspace_configuration"
+    );
+    assert_eq!(
+        unsupported(&|root| {
+            workspace_tree(root, "[\"packages/*\"]");
+            write(root, "pnpm-workspace.yaml", "packages: &list\n  - *list\n");
+        }),
+        "invalid_workspace_configuration"
+    );
+    // pnpm and npm declarations that disagree are tool dependent.
+    assert_eq!(
+        unsupported(&|root| {
+            workspace_tree(root, "[\"packages/*\"]");
+            write(root, "pnpm-workspace.yaml", "packages:\n  - 'apps/*'\n");
+        }),
+        "invalid_workspace_configuration"
+    );
+    // A name that could traverse is not an identity.
+    assert_eq!(
+        unsupported(&|root| {
+            workspace_tree(root, "[\"packages/*\"]");
+            write(root, "packages/b/package.json", "{ \"name\": \"../../b\" }");
+        }),
+        "invalid_workspace_configuration"
+    );
+    // An `exports` target that leaves the package.
+    let (_temp, edges) = indexed(|root| {
+        workspace_tree(root, "[\"packages/*\"]");
+        write(
+            root,
+            "packages/a/package.json",
+            "{ \"name\": \"@x/a\", \"exports\": \"../../outside.js\" }",
+        );
+    });
+    assert_eq!(
+        import_rule(&edges, "apps/use/main.js", "a"),
+        ("unsupported".into(), "invalid_package_target".into())
+    );
+    // pnpm always includes the root package; npm does not link it by name.
+    for (declaration, expected) in [
+        ("pnpm", ("resolved", "commonjs_require_binding")),
+        ("npm", ("unsupported", "package_or_unmapped_specifier")),
+    ] {
+        let (_temp, edges) = indexed(|root| {
+            if declaration == "pnpm" {
+                write(
+                    root,
+                    "package.json",
+                    "{ \"name\": \"lib\", \"exports\": { \".\": { \"types\": \"./dist/x.d.ts\", \"require\": \"./src/lib.js\" }, \"./built\": \"./dist/lib.js\" } }",
+                );
+                write(root, "pnpm-workspace.yaml", "packages:\n  - 'test/*'\n");
+            } else {
+                write(
+                    root,
+                    "package.json",
+                    "{ \"name\": \"lib\", \"exports\": { \".\": { \"types\": \"./dist/x.d.ts\", \"require\": \"./src/lib.js\" }, \"./built\": \"./dist/lib.js\" }, \"workspaces\": [\"test/*\"] }",
+                );
+            }
+            write(root, "src/lib.js", "exports.x = function x() {};\n");
+            write(
+                root,
+                "test/use/package.json",
+                "{ \"dependencies\": { \"lib\": \"workspace:*\" } }",
+            );
+            write(
+                root,
+                "test/use/main.js",
+                "const lib = require('lib');\nconst built = require('lib/built');\nlib.x();\n",
+            );
+        });
+        let (status, rule) = import_rule(&edges, "test/use/main.js", "lib");
+        assert_eq!((status.as_str(), rule.as_str()), expected, "{declaration}");
+        if declaration == "pnpm" {
+            assert_eq!(
+                import_rule(&edges, "test/use/main.js", "built"),
+                ("unsupported".into(), "module_in_excluded_directory".into())
+            );
+        }
+    }
+    // A class extending one imported from a workspace package that is not
+    // followed (here: an undeclared dependency on the root package, as in
+    // Chart.js's docs) is an unindexed-package subclass, as before workspace
+    // packages were modeled: it does not withhold unrelated `this.draw` sites.
+    let (_temp, edges) = indexed(|root| {
+        write(
+            root,
+            "package.json",
+            "{ \"name\": \"lib\", \"type\": \"module\", \"exports\": \"./dist/lib.js\" }",
+        );
+        write(root, "pnpm-workspace.yaml", "packages:\n  - 'docs'\n");
+        write(
+            root,
+            "src/chart.js",
+            "export class Chart {\n  draw() { return 1; }\n  render() { return this.draw(); }\n}\n",
+        );
+        write(
+            root,
+            "docs/package.json",
+            "{ \"name\": \"docs\", \"type\": \"module\" }",
+        );
+        write(
+            root,
+            "docs/custom.js",
+            "import { Chart } from 'lib';\nexport class Custom extends Chart {\n  draw() { return 2; }\n}\n",
+        );
+    });
+    assert_eq!(
+        import_rule(&edges, "docs/custom.js", "Chart"),
+        (
+            "unsupported".into(),
+            "workspace_dependency_not_declared".into()
+        )
+    );
+    let draw = edges
+        .iter()
+        .find(|edge| edge["target_text"] == "this.draw" && edge["kind"] == "CALLS")
+        .unwrap();
+    assert_eq!(draw["status"], "resolved", "{draw}");
+    // pnpm alone resolves; a re-export cycle across packages stays bounded.
+    let started = std::time::Instant::now();
+    let (_temp, edges) = indexed(|root| {
+        write(root, "package.json", "{ \"private\": true }");
+        write(root, "pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
+        for (me, other) in [("a", "b"), ("b", "a")] {
+            write(
+                root,
+                &format!("packages/{me}/package.json"),
+                &format!(
+                    "{{ \"name\": \"@x/{me}\", \"type\": \"module\", \"exports\": \"./index.js\", \"dependencies\": {{ \"@x/{other}\": \"workspace:*\" }} }}"
+                ),
+            );
+            write(
+                root,
+                &format!("packages/{me}/index.js"),
+                &format!("export * from '@x/{other}';\nexport function {me}() {{}}\n"),
+            );
+        }
+        write(
+            root,
+            "packages/a/use.js",
+            "import { b, missing } from '@x/b';\nb();\nmissing();\n",
+        );
+    });
+    assert!(started.elapsed().as_secs() < 60);
+    assert_eq!(import_rule(&edges, "packages/a/use.js", "b").0, "resolved");
+    assert_ne!(
+        import_rule(&edges, "packages/a/use.js", "missing").0,
+        "resolved"
+    );
+}
+
+/// 0.1.3: thousands of constructed receivers, aliases and escapes in one file
+/// stay bounded, and every receiver that escapes through its alias stays unconfirmed.
+#[test]
+fn constructed_receivers_at_scale_stay_bounded() {
+    let started = std::time::Instant::now();
+    let (_temp, edges) = indexed(|root| {
+        let mut receivers = String::from("class R { m() { return 1; } }\nfunction take() {}\n");
+        for i in 0..4000 {
+            writeln!(
+                receivers,
+                "const r{i} = new R();\nconst s{i} = r{i};\nif (r{i}) take(s{i});\nr{i}.m();"
+            )
+            .unwrap();
+        }
+        write(root, "receivers.js", &receivers);
+    });
+    assert!(
+        started.elapsed().as_secs() < 60,
+        "indexing took {:?}",
+        started.elapsed()
+    );
+    let calls: Vec<&Value> = edges
+        .iter()
+        .filter(|edge| {
+            edge["kind"] == "CALLS"
+                && edge["target_text"]
+                    .as_str()
+                    .is_some_and(|text| text.ends_with(".m"))
+        })
+        .collect();
+    assert!(!calls.is_empty());
+    for edge in calls {
+        assert_eq!(edge["evidence"]["rule"], "receiver_escapes", "{edge}");
+    }
 }
