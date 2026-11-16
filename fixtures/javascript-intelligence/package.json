@@ -1,0 +1,11 @@
+{
+  "name": "jsi-fixture",
+  "private": true,
+  "exports": {
+    ".": { "types": "./index.d.ts", "require": "./lib/index.js", "import": "./esm/index.mjs", "default": "./lib/index.js" },
+    "./utils": "./lib/utils.js",
+    "./cond": { "browser": "./lib/browser.js", "default": "./lib/utils.js" },
+    "./blocked": null,
+    "./features/*": "./lib/features/*.js"
+  }
+}

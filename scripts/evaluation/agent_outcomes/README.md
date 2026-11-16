@@ -13,10 +13,11 @@ harness/report.py       Wilson intervals, sign test, telemetry distributions, Ma
 tasks/suite.json        ledgerlite-v1 task definitions (agent-visible prompts + grader specs)
 tasks/hidden/<task>/    hidden tests, copied in only after a session ends
 tasks/reference/<task>/ reference solutions, used only by validation and mock-reference
+suites/nodekit-v1/      a second suite (CommonJS package), same layout; select it with `run.py --suite …/suite.json`
 tests/                  offline tests; fake_claude.py stands in for the agent CLI
 ```
 
-The task repository is [`fixtures/agent-outcomes/repo`](../../../fixtures/agent-outcomes/repo).
+The task repositories are [`fixtures/agent-outcomes/repo`](../../../fixtures/agent-outcomes/repo) (`ledgerlite-v1`) and [`fixtures/agent-outcomes/nodekit`](../../../fixtures/agent-outcomes/nodekit) (`nodekit-v1`).
 
 ## Adding a task
 

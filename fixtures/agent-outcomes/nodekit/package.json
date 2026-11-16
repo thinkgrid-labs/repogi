@@ -1,0 +1,8 @@
+{
+  "name": "nodekit",
+  "private": true,
+  "main": "./lib/index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

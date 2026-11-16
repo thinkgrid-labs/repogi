@@ -3,8 +3,9 @@ use code_intel_core::{
     IndexedFile, file_id,
     language::Language,
     semantic::{
-        Binding, ClassInfo, CommonJs, CommonJsExport, Export, Location, MemberContext, MemberWrite,
-        Module, NameAt, Relationship, Symbol, Usage,
+        AliasOf, Binding, ClassInfo, CommonJs, CommonJsExport, Export, Location,
+        MEMBER_ONLY_EXPORT_REASONS, MemberContext, MemberWrite, Module, NameAt, ObjectProperty,
+        ObjectTable, Relationship, Symbol, Usage,
     },
 };
 use tree_sitter::Node;
@@ -69,6 +70,7 @@ pub fn extract(root: Node<'_>, source: &str, file: &IndexedFile) -> Module {
                     )
                 }),
             signature_only,
+            form: node.and_then(|node| form(node, fact.start_byte, fact.end_byte)),
         });
     }
     bindings(root, source, file, &mut module);
@@ -140,7 +142,62 @@ pub fn extract(root: Node<'_>, source: &str, file: &IndexedFile) -> Module {
     if commonjs_file {
         commonjs(root, source, file, &writes, &mut module);
     }
+    if Language::of(&file.path).is_some_and(Language::is_javascript) {
+        origins(&mut module, root, source);
+        objects(root, source, file, &mut module);
+        prototype_tables(root, source, file, &mut module);
+    }
     module
+}
+
+/// The expression form of a fact that is not a declaration statement.
+fn form(node: Node<'_>, start: usize, end: usize) -> Option<String> {
+    if node.start_byte() != start || node.end_byte() != end {
+        return None;
+    }
+    let value = match node.kind() {
+        "assignment_expression" => node.child_by_field_name("right")?,
+        "pair" => node.child_by_field_name("value")?,
+        "method_definition"
+            if node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "object") =>
+        {
+            return Some("object_method".into());
+        }
+        "class" => return Some("class_expression".into()),
+        _ => return None,
+    };
+    match value.kind() {
+        "arrow_function" => Some("arrow_function".into()),
+        "function_expression" | "function" | "generator_function" => {
+            Some("function_expression".into())
+        }
+        _ => None,
+    }
+}
+
+/// The callable or class fact for an inline value at `site`: a function value
+/// is located at the slot (`site`), a class expression at itself.
+fn inline_fact(file: &IndexedFile, site: Node<'_>, value: Node<'_>) -> Option<String> {
+    let at = |node: Node<'_>, kinds: &[&str]| {
+        file.facts
+            .iter()
+            .find(|fact| {
+                kinds.contains(&fact.kind.as_str())
+                    && fact.start_byte == node.start_byte()
+                    && fact.end_byte == node.end_byte()
+            })
+            .map(|fact| fact.id.clone())
+    };
+    match value.kind() {
+        "function_expression" | "function" | "arrow_function" | "generator_function" => {
+            at(site, &["function"])
+        }
+        "class" => at(value, &["class"]),
+        _ if site.kind() == "method_definition" => at(site, &["method"]),
+        _ => None,
+    }
 }
 
 /// `require("literal")` or `require("literal").member`.
@@ -258,6 +315,7 @@ fn export_value(
         local: None,
         module: None,
         member: None,
+        fact: inline_fact(file, site, value),
         location: location(site, &file.path),
     };
     if matches!(value.kind(), "identifier" | "shorthand_property_identifier") {
@@ -265,8 +323,25 @@ fn export_value(
     } else if let Some((specifier, member)) = require_call(value, source) {
         export.module = Some(specifier);
         export.member = member;
+    } else if let Some((local, member)) = local_member(value, source) {
+        export.local = Some(local);
+        export.member = Some(member);
     }
     export
+}
+
+/// `x.member` with an identifier object (not `this`) and a plain property name.
+fn local_member(value: Node<'_>, source: &str) -> Option<(String, String)> {
+    if value.kind() != "member_expression" {
+        return None;
+    }
+    let object = value
+        .child_by_field_name("object")
+        .filter(|object| object.kind() == "identifier")?;
+    let property = value
+        .child_by_field_name("property")
+        .filter(|property| property.kind() == "property_identifier")?;
+    Some((text(object, source).into(), text(property, source).into()))
 }
 
 /// `CommonJS` export table: unconditional top-level `module.exports = …`,
@@ -285,20 +360,68 @@ fn commonjs(
     let mut seen = false;
     let mut alias_live = true;
     let mut handled = std::collections::HashSet::new();
+    // The first reason is kept, except that a reason which may replace the
+    // `module.exports` value itself outranks one that only affects members.
     let dynamic = |reason: &str, table: &mut CommonJs| {
-        if table.dynamic.is_none() {
+        let members_only = |reason: &str| MEMBER_ONLY_EXPORT_REASONS.contains(&reason);
+        if table
+            .dynamic
+            .as_deref()
+            .is_none_or(|current| members_only(current) && !members_only(reason))
+        {
             table.dynamic = Some(reason.into());
         }
     };
     let mut cursor = root.walk();
     for statement in root.named_children(&mut cursor) {
-        let Some(assignment) = (statement.kind() == "expression_statement")
+        // `const p = module.exports = …` / `var p = exports = module.exports = …`:
+        // the exported value is the declared binding.
+        if let Some((declarator, chain, keeps_alias)) = declared_exports(statement, source) {
+            for left in chain {
+                handled.insert(left);
+            }
+            seen = true;
+            alias_live = keeps_alias;
+            table.exports.clear();
+            if let Some(name) = declarator.child_by_field_name("name") {
+                table.exports.push(CommonJsExport {
+                    name: String::new(),
+                    local: Some(text(name, source).into()),
+                    module: None,
+                    member: None,
+                    fact: None,
+                    location: location(declarator, &file.path),
+                });
+            }
+            continue;
+        }
+        let Some(mut assignment) = (statement.kind() == "expression_statement")
             .then(|| statement.named_child(0))
             .flatten()
             .filter(|node| node.kind() == "assignment_expression")
         else {
             continue;
         };
+        // `exports = module.exports = value`: both name the new value, so the
+        // `exports` alias stays live for later `exports.name = …` statements.
+        let mut keeps_alias = false;
+        if let (Some(outer), Some(inner)) = (
+            assignment.child_by_field_name("left"),
+            assignment.child_by_field_name("right"),
+        ) && outer.kind() == "identifier"
+            && text(outer, source) == "exports"
+            && inner.kind() == "assignment_expression"
+            && inner
+                .child_by_field_name("left")
+                .is_some_and(|left| module_exports(left, source))
+            && inner
+                .child_by_field_name("right")
+                .is_some_and(|value| value.kind() != "assignment_expression")
+        {
+            handled.insert(outer.start_byte());
+            assignment = inner;
+            keeps_alias = true;
+        }
         let (Some(left), Some(right)) = (
             assignment.child_by_field_name("left"),
             assignment.child_by_field_name("right"),
@@ -314,7 +437,7 @@ fn commonjs(
         if module_exports(left, source) {
             handled.insert(left.start_byte());
             seen = true;
-            alias_live = false;
+            alias_live = keeps_alias;
             table.exports.clear();
             match right.kind() {
                 "object" => {
@@ -358,6 +481,7 @@ fn commonjs(
                                         local: None,
                                         module: None,
                                         member: None,
+                                        fact: inline_fact(file, property, property),
                                         location: location(property, &file.path),
                                     });
                                 } else {
@@ -418,13 +542,28 @@ fn commonjs(
             }
         }
     }
-    // Writes to the export objects anywhere else (nested, conditional, aliased).
-    if writes.iter().any(|(name, offset)| {
-        matches!(name.as_str(), "module" | "exports") && !handled.contains(offset)
-    }) || export_writes(root, source, &handled)
+    // Writes to the export objects anywhere else (nested, conditional, aliased):
+    // rebinding `module` or assigning `module.exports` may replace the value;
+    // member writes (and rebinding the `exports` alias) change members only.
+    if writes
+        .iter()
+        .any(|(name, offset)| name == "module" && !handled.contains(offset))
+        || export_writes(root, source, &handled, true)
     {
         seen = true;
         dynamic("nested_or_conditional_export_write", &mut table);
+    }
+    if writes
+        .iter()
+        .any(|(name, offset)| name == "exports" && !handled.contains(offset))
+        || export_writes(root, source, &handled, false)
+    {
+        seen = true;
+        dynamic("nested_or_conditional_export_member_write", &mut table);
+    }
+    if module_escapes(root, source) {
+        seen = true;
+        dynamic("module_object_escapes", &mut table);
     }
     if escapes(root, source) {
         seen = true;
@@ -446,9 +585,39 @@ fn commonjs(
     }
 }
 
-/// A write to `module.exports`, `exports` or one of their members that is not
-/// one of the `handled` top-level statements.
-fn export_writes(node: Node<'_>, source: &str, handled: &std::collections::HashSet<usize>) -> bool {
+/// `module` used as a value (`factory(module)`, `const m = module`): code that
+/// receives it may replace `module.exports`. `module.x` member uses and
+/// comparisons (`require.main === module`) do not let it escape.
+fn module_escapes(node: Node<'_>, source: &str) -> bool {
+    if matches!(node.kind(), "comment" | "string" | "template_chars") {
+        return false;
+    }
+    if node.kind() == "identifier"
+        && text(node, source) == "module"
+        && !node.parent().is_some_and(|parent| {
+            (parent.kind() == "member_expression"
+                && parent.child_by_field_name("object") == Some(node))
+                || parent.kind() == "binary_expression"
+        })
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    children
+        .into_iter()
+        .any(|child| module_escapes(child, source))
+}
+
+/// A write to `module.exports` itself (`whole`), or to a member of `exports` or
+/// `module.exports` (otherwise), that is not one of the `handled` top-level
+/// statements.
+fn export_writes(
+    node: Node<'_>,
+    source: &str,
+    handled: &std::collections::HashSet<usize>,
+    whole: bool,
+) -> bool {
     if matches!(
         node.kind(),
         "assignment_expression" | "augmented_assignment_expression" | "update_expression"
@@ -460,7 +629,7 @@ fn export_writes(node: Node<'_>, source: &str, handled: &std::collections::HashS
         let target = |node: Node<'_>| exports_object(node, source, true);
         let member = matches!(left.kind(), "member_expression" | "subscript_expression")
             && left.child_by_field_name("object").is_some_and(target);
-        if target(left) || member {
+        if (whole && module_exports(left, source)) || (!whole && member) {
             return true;
         }
     }
@@ -468,7 +637,7 @@ fn export_writes(node: Node<'_>, source: &str, handled: &std::collections::HashS
     let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
     children
         .into_iter()
-        .any(|child| export_writes(child, source, handled))
+        .any(|child| export_writes(child, source, handled, whole))
 }
 
 /// `exports`/`module.exports` passed to a call (`Object.assign(exports, …)`,
@@ -816,6 +985,8 @@ fn bind(
             location: location(name, &file.path),
             mutated_members: Vec::new(),
             commonjs: false,
+            alias: None,
+            constructed: None,
         });
     } else {
         let mut cursor = name.walk();
@@ -996,6 +1167,8 @@ fn imports(node: Node<'_>, root: Node<'_>, source: &str, file: &IndexedFile, mod
             location: location(site, &file.path),
             mutated_members: Vec::new(),
             commonjs: false,
+            alias: None,
+            constructed: None,
         });
     }
 }
@@ -1416,10 +1589,22 @@ fn assigned_names(
                     .filter(|index| index.kind() == "string")
                     .map(|index| literal(index, source))
             };
+            // `module.exports.x` and `F.prototype.x` keep their dotted receiver so
+            // the binder can tell export and prototype statements from writes
+            // on unknown objects.
+            let dotted = object
+                .filter(|object| object.kind() == "member_expression")
+                .and_then(|object| {
+                    let (base, member) = local_member(object, source)?;
+                    (property.is_some()
+                        && ((base == "module" && member == "exports") || member == "prototype"))
+                        .then(|| format!("{base}.{member}"))
+                });
             members.push(MemberWrite {
                 receiver: object
                     .filter(|object| matches!(object.kind(), "identifier" | "this"))
-                    .map(|object| text(object, source).to_owned()),
+                    .map(|object| text(object, source).to_owned())
+                    .or(dotted),
                 property,
                 offset: node.start_byte(),
             });
@@ -1464,6 +1649,559 @@ fn assigned_names(
             }
         }
     }
+}
+
+/// `const p = module.exports = value` or `var p = exports = module.exports = value`
+/// as the only declarator of a top-level declaration: the declarator, the
+/// written targets' offsets, and whether `exports` still aliases the value.
+fn declared_exports<'a>(statement: Node<'a>, source: &str) -> Option<(Node<'a>, Vec<usize>, bool)> {
+    if !matches!(
+        statement.kind(),
+        "lexical_declaration" | "variable_declaration"
+    ) || statement.named_child_count() != 1
+    {
+        return None;
+    }
+    let declarator = statement.named_child(0)?;
+    declarator
+        .child_by_field_name("name")
+        .filter(|name| name.kind() == "identifier")?;
+    let mut value = declarator.child_by_field_name("value")?;
+    let mut chain = Vec::new();
+    let mut alias = false;
+    let mut exported = false;
+    while value.kind() == "assignment_expression" {
+        let left = value.child_by_field_name("left")?;
+        if module_exports(left, source) && !exported {
+            exported = true;
+        } else if left.kind() == "identifier" && text(left, source) == "exports" && !exported {
+            alias = true;
+        } else {
+            return None;
+        }
+        chain.push(left.start_byte());
+        value = value.child_by_field_name("right")?;
+    }
+    exported.then_some((declarator, chain, alias))
+}
+
+/// Alias (`const v = w`, `const v = w.p`) and constructor (`const x = new F()`)
+/// origins of declared bindings. `require(…)` declarators are `CommonJS` bindings.
+fn origins(module: &mut Module, root: Node<'_>, source: &str) {
+    for binding in &mut module.bindings {
+        if binding.module.is_some() || binding.commonjs {
+            continue;
+        }
+        let Some(declarator) = root
+            .descendant_for_byte_range(binding.location.start_byte, binding.location.end_byte)
+            .and_then(|name| name.parent())
+            .filter(|declarator| {
+                declarator.kind() == "variable_declarator"
+                    && declarator
+                        .child_by_field_name("name")
+                        .is_some_and(|name| name.start_byte() == binding.location.start_byte)
+            })
+        else {
+            continue;
+        };
+        let Some(value) = declarator.child_by_field_name("value") else {
+            continue;
+        };
+        match value.kind() {
+            "identifier" if !matches!(text(value, source), "undefined" | "arguments") => {
+                binding.alias = Some(AliasOf {
+                    name: text(value, source).into(),
+                    member: None,
+                });
+            }
+            "member_expression" => {
+                if let Some((name, member)) = local_member(value, source) {
+                    binding.alias = Some(AliasOf {
+                        name,
+                        member: Some(member),
+                    });
+                }
+            }
+            "new_expression" => {
+                binding.constructed = value
+                    .child_by_field_name("constructor")
+                    .filter(|constructor| constructor.kind() == "identifier")
+                    .map(|constructor| text(constructor, source).into());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A property of an object literal or an assigned member: its value's fact,
+/// local identifier, `local.member` or `require()` origin.
+fn property_value(
+    name: String,
+    site: Node<'_>,
+    value: Node<'_>,
+    source: &str,
+    file: &IndexedFile,
+) -> ObjectProperty {
+    let export = export_value(name, value, site, source, file);
+    ObjectProperty {
+        name: export.name,
+        fact: export.fact,
+        local: export.local,
+        member: export.member,
+        module: export.module,
+        accessor: false,
+        redefined: false,
+        location: export.location,
+    }
+}
+
+fn add_property(table: &mut ObjectTable, property: ObjectProperty) {
+    if let Some(existing) = table
+        .properties
+        .iter_mut()
+        .find(|existing| existing.name == property.name)
+    {
+        existing.redefined = true;
+    } else {
+        table.properties.push(property);
+    }
+}
+
+/// The plain key of an object-literal property: identifier, string or number.
+fn property_key(key: Node<'_>, source: &str) -> Option<String> {
+    match key.kind() {
+        "property_identifier" | "number" => Some(text(key, source).into()),
+        "string" if !text(key, source).contains('\\') => Some(literal(key, source)),
+        _ => None,
+    }
+}
+
+/// Is `node` in a written position: an assignment target, an update operand
+/// or a `delete` operand?
+fn written(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| {
+        (matches!(
+            parent.kind(),
+            "assignment_expression" | "augmented_assignment_expression"
+        ) && parent.child_by_field_name("left") == Some(node))
+            || parent.kind() == "update_expression"
+            || (parent.kind() == "unary_expression" && token(parent, "delete"))
+    })
+}
+
+/// Is the identifier at `node` the value of a top-level `CommonJS` export
+/// statement (`module.exports = x`, `exports.n = x`, `module.exports = { x }`)?
+fn exported_value(node: Node<'_>, source: &str) -> bool {
+    let mut site = node;
+    if let Some(parent) = node.parent().filter(|parent| parent.kind() == "object") {
+        site = parent;
+    }
+    let Some(assignment) = site
+        .parent()
+        .filter(|parent| parent.kind() == "assignment_expression")
+    else {
+        return false;
+    };
+    let top = assignment.parent().is_some_and(|statement| {
+        statement.kind() == "expression_statement"
+            && statement
+                .parent()
+                .is_some_and(|root| root.kind() == "program")
+    });
+    let left = assignment.child_by_field_name("left");
+    top && assignment.child_by_field_name("right") == Some(site)
+        && left.is_some_and(|left| {
+            module_exports(left, source)
+                || (site == node
+                    && left.kind() == "member_expression"
+                    && left
+                        .child_by_field_name("object")
+                        .is_some_and(|object| exports_object(object, source, true)))
+        })
+}
+
+/// The first use of `name` (at top-level binding scope) that lets the value
+/// escape or change outside the statements that built its table. `allowed`
+/// accepts the remaining shapes.
+fn escape(
+    node: Node<'_>,
+    name: &str,
+    source: &str,
+    module: &Module,
+    allowed: &dyn Fn(Node<'_>) -> Option<&'static str>,
+) -> Option<&'static str> {
+    if matches!(node.kind(), "comment" | "string" | "template_chars") {
+        return None;
+    }
+    if matches!(node.kind(), "identifier" | "shorthand_property_identifier")
+        && text(node, source) == name
+        && !module.bindings.iter().any(|binding| {
+            binding.name == name
+                && !binding.top_level
+                && binding.scope_start <= node.start_byte()
+                && node.start_byte() < binding.scope_end
+        })
+        && let Some(reason) = allowed(node)
+    {
+        return Some(reason);
+    }
+    let mut cursor = node.walk();
+    let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    children
+        .into_iter()
+        .find_map(|child| escape(child, name, source, module, allowed))
+}
+
+/// Object tables of top-level `const|let|var x = { … }` bindings (also
+/// `x = module.exports = { … }`), extended by unconditional top-level
+/// `x.name = value` statements. The table is dynamic when `x` is used in any
+/// other way that could change or leak the object: passed or assigned as a
+/// value, written in nested code, computed or deleted members, spreads,
+/// computed keys or `__proto__` in the literal.
+#[allow(clippy::too_many_lines)] // Literal, statements, then the escape scan.
+fn objects(root: Node<'_>, source: &str, file: &IndexedFile, module: &mut Module) {
+    let mut tables: Vec<(usize, ObjectTable)> = Vec::new();
+    let mut cursor = root.walk();
+    let statements: Vec<Node<'_>> = root.named_children(&mut cursor).collect();
+    for statement in &statements {
+        let declaration = if statement.kind() == "export_statement" {
+            statement.child_by_field_name("declaration")
+        } else {
+            Some(*statement)
+        };
+        let Some(declaration) = declaration.filter(|declaration| {
+            matches!(
+                declaration.kind(),
+                "lexical_declaration" | "variable_declaration"
+            )
+        }) else {
+            continue;
+        };
+        let mut inner = declaration.walk();
+        for declarator in declaration.named_children(&mut inner) {
+            let (Some(name), Some(mut value)) = (
+                declarator
+                    .child_by_field_name("name")
+                    .filter(|name| name.kind() == "identifier"),
+                declarator.child_by_field_name("value"),
+            ) else {
+                continue;
+            };
+            let mut supported = true;
+            while value.kind() == "assignment_expression" {
+                let left = value.child_by_field_name("left");
+                supported &= left.is_some_and(|left| {
+                    module_exports(left, source)
+                        || (left.kind() == "identifier" && text(left, source) == "exports")
+                });
+                let Some(right) = value.child_by_field_name("right") else {
+                    break;
+                };
+                value = right;
+            }
+            let Some(owner) = file
+                .facts
+                .iter()
+                .find(|fact| {
+                    fact.kind == "variable"
+                        && fact.start_byte == declarator.start_byte()
+                        && fact.end_byte == declarator.end_byte()
+                })
+                .map(|fact| fact.id.clone())
+            else {
+                continue;
+            };
+            if value.kind() != "object" || !supported {
+                continue;
+            }
+            let mut table = ObjectTable {
+                name: text(name, source).into(),
+                owner,
+                ..ObjectTable::default()
+            };
+            let mut properties = value.walk();
+            for property in value.named_children(&mut properties) {
+                match property.kind() {
+                    "comment" => {}
+                    "shorthand_property_identifier" => {
+                        let key = text(property, source).to_owned();
+                        add_property(
+                            &mut table,
+                            property_value(key, property, property, source, file),
+                        );
+                    }
+                    "pair" => {
+                        let key = property
+                            .child_by_field_name("key")
+                            .and_then(|key| property_key(key, source));
+                        match (key, property.child_by_field_name("value")) {
+                            (Some(key), _) if key == "__proto__" => {
+                                table.dynamic = Some("prototype_set_in_literal".into());
+                            }
+                            (Some(key), Some(value)) => add_property(
+                                &mut table,
+                                property_value(key, property, value, source, file),
+                            ),
+                            _ => table.dynamic = Some("computed_or_spread_property".into()),
+                        }
+                    }
+                    "method_definition" => {
+                        match property
+                            .child_by_field_name("name")
+                            .and_then(|key| property_key(key, source))
+                        {
+                            Some(key) => {
+                                let accessor = token(property, "get") || token(property, "set");
+                                let mut entry =
+                                    property_value(key, property, property, source, file);
+                                entry.fact = (!accessor)
+                                    .then(|| inline_fact(file, property, property))
+                                    .flatten();
+                                entry.accessor = accessor;
+                                add_property(&mut table, entry);
+                            }
+                            None => {
+                                table.dynamic = Some("computed_or_spread_property".into());
+                            }
+                        }
+                    }
+                    _ => table.dynamic = Some("computed_or_spread_property".into()),
+                }
+            }
+            tables.push((name.start_byte(), table));
+        }
+    }
+    // Unconditional top-level `x.name = value` statements, in source order.
+    for statement in &statements {
+        let Some(assignment) = (statement.kind() == "expression_statement")
+            .then(|| statement.named_child(0))
+            .flatten()
+            .filter(|node| node.kind() == "assignment_expression")
+        else {
+            continue;
+        };
+        let (Some(left), Some(value)) = (
+            assignment.child_by_field_name("left"),
+            assignment.child_by_field_name("right"),
+        ) else {
+            continue;
+        };
+        let Some((receiver, property)) = local_member(left, source) else {
+            continue;
+        };
+        let Some((_, table)) = tables.iter_mut().find(|(_, table)| table.name == receiver) else {
+            continue;
+        };
+        table.statements.push(left.start_byte());
+        let mut entry = property_value(property, assignment, value, source, file);
+        if value.kind() == "assignment_expression" {
+            // `x.a = y.b = f`: the chain's other targets are separate writes.
+            entry.fact = None;
+            entry.local = None;
+            entry.member = None;
+            entry.module = None;
+        }
+        add_property(table, entry);
+    }
+    for (declared, table) in &mut tables {
+        if table.dynamic.is_some() {
+            continue;
+        }
+        let statements = table.statements.clone();
+        let declared = *declared;
+        let allowed = |node: Node<'_>| -> Option<&'static str> {
+            if node.start_byte() == declared || exported_value(node, source) {
+                return None;
+            }
+            let parent = node.parent()?;
+            match parent.kind() {
+                "member_expression" if parent.child_by_field_name("object") == Some(node) => {
+                    (written(parent) && !statements.contains(&parent.start_byte()))
+                        .then_some("object_member_written_elsewhere")
+                }
+                "subscript_expression" if parent.child_by_field_name("object") == Some(node) => {
+                    written(parent).then_some("object_member_written_elsewhere")
+                }
+                _ => Some("object_escapes"),
+            }
+        };
+        table.dynamic = escape(root, &table.name, source, module, &allowed).map(str::to_owned);
+    }
+    // A table's own statements define its properties: they are not writes
+    // that invalidate member uses of the binding (redefinitions are tracked
+    // on the table instead).
+    for (_, table) in &tables {
+        for binding in module
+            .bindings
+            .iter_mut()
+            .filter(|binding| binding.top_level && binding.name == table.name)
+        {
+            let visible =
+                |offset: usize| binding.scope_start <= offset && offset < binding.scope_end;
+            let mut mutated: Vec<String> = module
+                .member_writes
+                .iter()
+                .filter(|write| {
+                    write.receiver.as_deref() == Some(binding.name.as_str())
+                        && visible(write.offset)
+                        && !table.statements.contains(&write.offset)
+                })
+                .map(|write| write.property.clone().unwrap_or_else(|| "*".into()))
+                .collect();
+            mutated.sort();
+            mutated.dedup();
+            binding.mutated_members = mutated;
+        }
+    }
+    module.objects = tables.into_iter().map(|(_, table)| table).collect();
+}
+
+/// The fact of the top-level function declaration `name`.
+fn function_declaration(module: &Module, file: &IndexedFile, name: &str) -> Option<String> {
+    module
+        .bindings
+        .iter()
+        .find(|binding| binding.top_level && binding.name == name && binding.module.is_none())
+        .and_then(|binding| binding.target.as_deref())
+        .filter(|target| {
+            file.facts
+                .iter()
+                .any(|fact| fact.id == *target && fact.kind == "function")
+        })
+        .map(str::to_owned)
+}
+
+/// Prototype tables of top-level function declarations, from unconditional
+/// top-level `F.prototype.name = value` statements. Dynamic when the prototype
+/// is replaced or changed elsewhere, `F` escapes (`inherits(F, …)`, aliases),
+/// the module manipulates prototypes opaquely, or `this` gains computed own
+/// members (`this[k] = …`, `Object.assign(this, …)`).
+#[allow(clippy::too_many_lines)] // Statements, then each documented reason a table is dynamic.
+fn prototype_tables(root: Node<'_>, source: &str, file: &IndexedFile, module: &mut Module) {
+    let mut tables: Vec<ObjectTable> = Vec::new();
+    let mut cursor = root.walk();
+    for statement in root.named_children(&mut cursor) {
+        let Some(assignment) = (statement.kind() == "expression_statement")
+            .then(|| statement.named_child(0))
+            .flatten()
+            .filter(|node| node.kind() == "assignment_expression")
+        else {
+            continue;
+        };
+        let (Some(left), Some(value)) = (
+            assignment.child_by_field_name("left"),
+            assignment.child_by_field_name("right"),
+        ) else {
+            continue;
+        };
+        // `F.prototype = …` replaces the prototype: F gets a table so its
+        // instances report the replacement instead of a generic failure.
+        if let Some((function, member)) = local_member(left, source)
+            && member == "prototype"
+            && !tables.iter().any(|table| table.name == function)
+            && let Some(owner) = function_declaration(module, file, &function)
+        {
+            tables.push(ObjectTable {
+                name: function,
+                owner,
+                ..ObjectTable::default()
+            });
+            continue;
+        }
+        let Some(prototype) = left
+            .child_by_field_name("object")
+            .filter(|_| left.kind() == "member_expression")
+        else {
+            continue;
+        };
+        let Some((function, "prototype")) = local_member(prototype, source)
+            .as_ref()
+            .map(|(name, member)| (name.clone(), member.as_str()))
+        else {
+            continue;
+        };
+        let Some(property) = left
+            .child_by_field_name("property")
+            .filter(|property| property.kind() == "property_identifier")
+            .map(|property| text(property, source).to_owned())
+        else {
+            continue;
+        };
+        let Some(owner) = function_declaration(module, file, &function) else {
+            continue;
+        };
+        let index = if let Some(index) = tables.iter().position(|table| table.name == function) {
+            index
+        } else {
+            tables.push(ObjectTable {
+                name: function.clone(),
+                owner,
+                ..ObjectTable::default()
+            });
+            tables.len() - 1
+        };
+        let table = &mut tables[index];
+        table.statements.push(left.start_byte());
+        let mut entry = property_value(property, assignment, value, source, file);
+        if value.kind() == "assignment_expression" {
+            entry.fact = None;
+            entry.local = None;
+            entry.member = None;
+            entry.module = None;
+        }
+        add_property(table, entry);
+    }
+    let mut computed_this = ClassInfo::default();
+    dynamic_this(root, source, &mut computed_this);
+    let computed_this = computed_this.dynamic_members
+        || module
+            .member_writes
+            .iter()
+            .any(|write| write.receiver.as_deref() == Some("this") && write.property.is_none());
+    for table in &mut tables {
+        let statements = table.statements.clone();
+        let reason = if module.prototype_opaque {
+            Some("prototype_may_be_modified")
+        } else if computed_this {
+            Some("dynamic_own_members")
+        } else if module
+            .prototype_uses
+            .iter()
+            .any(|used| used.name == table.name && !statements.contains(&used.offset))
+        {
+            Some("prototype_may_be_modified")
+        } else {
+            let allowed = |node: Node<'_>| -> Option<&'static str> {
+                if exported_value(node, source) {
+                    return None;
+                }
+                let parent = node.parent()?;
+                match parent.kind() {
+                    // The declaration's own name.
+                    "function_declaration" | "generator_function_declaration"
+                        if parent.child_by_field_name("name") == Some(node) =>
+                    {
+                        None
+                    }
+                    "new_expression" if parent.child_by_field_name("constructor") == Some(node) => {
+                        None
+                    }
+                    "call_expression" if parent.child_by_field_name("function") == Some(node) => {
+                        None
+                    }
+                    // `F.x` reads; `F.prototype…` changes are prototype uses.
+                    "member_expression" if parent.child_by_field_name("object") == Some(node) => {
+                        None
+                    }
+                    "binary_expression" => None,
+                    _ => Some("constructor_escapes"),
+                }
+            };
+            escape(root, &table.name, source, module, &allowed)
+        };
+        table.dynamic = reason.map(str::to_owned);
+    }
+    module.prototypes = tables;
 }
 
 #[cfg(test)]

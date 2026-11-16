@@ -1,6 +1,7 @@
-//! v0.1.3 static accuracy: instance dispatch (`this.m`, `super.m`) and `CommonJS`
-//! against hand-reviewed labels in `fixtures/instance-dispatch/EXPECTED.json`
-//! and `fixtures/commonjs/EXPECTED.json`. Every resolved edge must be labeled
+//! Static accuracy: instance dispatch (`this.m`, `super.m`), `CommonJS`, and the
+//! v0.1.4 `JavaScript` analysis (callable values, object and prototype tables,
+//! alias origins, package entry points) against hand-reviewed labels in
+//! `fixtures/{instance-dispatch,commonjs,javascript-intelligence}/EXPECTED.json`. Every resolved edge must be labeled
 //! with its exact target declaration line (precision), every label must
 //! resolve (recall), and unconfirmed sites must keep their status and rule.
 //! Incremental indexing must reproduce a fresh index. Nothing is executed.
@@ -110,9 +111,13 @@ fn key(edge: &Value) -> (String, u64, String, String) {
     )
 }
 
+/// Edges that name a statically selected method rather than a binding:
+/// `this.m`/`super.m`, and prototype methods of a `new F()` receiver.
 fn instance(edge: &Value) -> bool {
     let text = edge["target_text"].as_str().unwrap_or_default();
-    text.starts_with("this.") || text.starts_with("super.")
+    text.starts_with("this.")
+        || text.starts_with("super.")
+        || edge["evidence"]["rule"] == "prototype_method_static_declaration"
 }
 
 fn check_labels(name: &str) {
@@ -205,6 +210,11 @@ fn instance_dispatch_matches_labels() {
 }
 
 #[test]
+fn javascript_intelligence_matches_labels() {
+    check_labels("javascript-intelligence");
+}
+
+#[test]
 fn commonjs_matches_labels() {
     check_labels("commonjs");
 }
@@ -220,7 +230,7 @@ fn canonical(root: &Path) -> Vec<String> {
 /// give exactly the graph a fresh index of the edited tree gives.
 #[test]
 fn incremental_index_reproduces_fresh_index() {
-    for name in ["instance-dispatch", "commonjs"] {
+    for name in ["instance-dispatch", "commonjs", "javascript-intelligence"] {
         let (_temp, root) = copy(name);
         json(&root, &["index", "."]);
         if name == "instance-dispatch" {
@@ -233,6 +243,29 @@ fn incremental_index_reproduces_fresh_index() {
                     "write() { return super.write() + 1; }",
                     "other() { return 1; }",
                 ),
+            )
+            .unwrap();
+        } else if name == "javascript-intelligence" {
+            // A consumer write disappears, an `exports` subpath moves and an
+            // object stops escaping: tables in other modules must follow.
+            fs::write(
+                root.join("lib/patch.js"),
+                "const patched = require('./patched');\npatched.refresh();\n",
+            )
+            .unwrap();
+            let package = fs::read_to_string(root.join("package.json")).unwrap();
+            fs::write(
+                root.join("package.json"),
+                package.replace(
+                    "\"./utils\": \"./lib/utils.js\"",
+                    "\"./utils\": \"./lib/browser.js\"",
+                ),
+            )
+            .unwrap();
+            let objects = fs::read_to_string(root.join("lib/objects-dynamic.js")).unwrap();
+            fs::write(
+                root.join("lib/objects-dynamic.js"),
+                objects.replace("register(a);", "register();"),
             )
             .unwrap();
         } else {
@@ -248,7 +281,14 @@ fn incremental_index_reproduces_fresh_index() {
         assert!(report["files_changed"].as_u64().unwrap() >= 1, "{report}");
         let incremental = canonical(&root);
         let (_fresh_temp, fresh) = copy(name);
-        for file in ["src/file.js", "lib/conditional.js", "esm-pkg/package.json"] {
+        for file in [
+            "src/file.js",
+            "lib/conditional.js",
+            "esm-pkg/package.json",
+            "lib/patch.js",
+            "package.json",
+            "lib/objects-dynamic.js",
+        ] {
             if root.join(file).exists() {
                 fs::copy(root.join(file), fresh.join(file)).unwrap();
             }
@@ -266,6 +306,16 @@ fn incremental_index_reproduces_fresh_index() {
         };
         if name == "instance-dispatch" {
             assert!(resolved("src/base.js", "this.write"));
+        } else if name == "javascript-intelligence" {
+            assert!(resolved("app/patch-user.js", "patched.validate"));
+            assert!(edges.iter().any(|edge| {
+                edge["location"]["path"] == "app/main.js"
+                    && edge["target_text"] == "utils.slug"
+                    && edge["kind"] == "CALLS"
+                    && edge["target_id"]
+                        .as_str()
+                        .is_some_and(|id| id.contains("lib/browser.js"))
+            }));
         } else {
             assert!(resolved("app/main.js", "cond.a"));
             assert!(
@@ -352,5 +402,135 @@ fn adversarial_hierarchies_and_writes_stay_bounded() {
         !edges
             .iter()
             .any(|edge| edge["location"]["path"] == "comments.js" && edge["kind"] == "EXPORTS")
+    );
+}
+
+/// v0.1.4 inputs that must stay bounded and never confirm a guessed target:
+/// long alias chains, `main` redirect cycles, symlinked and malformed
+/// `package.json` files, deeply nested `exports`, a huge object literal and
+/// `__proto__` in a literal. Nothing is executed or fetched.
+#[test]
+#[allow(clippy::too_many_lines)] // One tree with every adversarial input, checked together.
+fn javascript_adversarial_inputs_stay_bounded() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let outside = TempDir::new().unwrap();
+    fs::write(root.join("package.json"), "{ \"name\": \"adv\" }").unwrap();
+    // 400 chained aliases of one function, then a call through the last one.
+    let mut chain = String::from("function f() { return 1; }\nconst a0 = f;\n");
+    for i in 1..400 {
+        writeln!(chain, "const a{i} = a{};", i - 1).unwrap();
+    }
+    chain.push_str("a399();\nmodule.exports = { a399 };\n");
+    fs::write(root.join("chain.js"), chain).unwrap();
+    // `main` redirect cycle between two local packages.
+    for (dir, main) in [("p", "../q"), ("q", "../p")] {
+        fs::create_dir_all(root.join(dir)).unwrap();
+        fs::write(
+            root.join(dir).join("package.json"),
+            format!("{{ \"main\": \"{main}\" }}"),
+        )
+        .unwrap();
+    }
+    // A symlinked package.json pointing outside the root, and a malformed one.
+    fs::create_dir_all(root.join("linked")).unwrap();
+    fs::write(
+        outside.path().join("package.json"),
+        "{ \"main\": \"../../etc/passwd\" }",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        outside.path().join("package.json"),
+        root.join("linked/package.json"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("linked/index.js"),
+        "exports.x = function x() {};\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("broken")).unwrap();
+    fs::write(root.join("broken/package.json"), "{ \"main\": 7, ").unwrap();
+    fs::write(
+        root.join("broken/index.js"),
+        "exports.x = function x() {};\n",
+    )
+    .unwrap();
+    // `exports` nested far beyond the bound, as a self-reference target.
+    let mut nested = String::from("\"./lib.js\"");
+    // 60 levels: within serde_json's recursion limit, beyond Repogi's bound.
+    for _ in 0..60 {
+        nested = format!("{{ \"default\": {nested} }}");
+    }
+    fs::create_dir_all(root.join("deep")).unwrap();
+    fs::write(
+        root.join("deep/package.json"),
+        format!("{{ \"name\": \"deep\", \"exports\": {nested} }}"),
+    )
+    .unwrap();
+    fs::write(root.join("deep/lib.js"), "exports.x = function x() {};\n").unwrap();
+    fs::write(
+        root.join("deep/use.js"),
+        "const d = require('deep');\nd.x();\n",
+    )
+    .unwrap();
+    // A huge literal and a `__proto__` key.
+    let mut huge = String::from("const big = {\n");
+    for i in 0..3000 {
+        writeln!(huge, "  m{i}() {{ return {i}; }},").unwrap();
+    }
+    huge.push_str("};\nbig.m2999();\nconst bad = { __proto__: null, run() {} };\nbad.run();\n");
+    fs::write(root.join("huge.js"), huge).unwrap();
+    fs::write(
+        root.join("use.js"),
+        "const p = require('./p');\nconst l = require('./linked');\nconst b = require('./broken');\np.x(); l.x(); b.x();\n",
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    json(&root, &["index", "."]);
+    assert!(
+        started.elapsed().as_secs() < 60,
+        "indexing took {:?}",
+        started.elapsed()
+    );
+    let edges = graph(&root);
+    let edge = |path: &str, kind: &str, text: &str| {
+        edges
+            .iter()
+            .find(|edge| {
+                edge["location"]["path"] == path
+                    && edge["kind"] == kind
+                    && edge["target_text"] == text
+            })
+            .unwrap_or_else(|| panic!("no {kind} {text} in {path}"))
+            .clone()
+    };
+    // The alias walk is bounded: the call does not reach `f` through 400 hops.
+    let call = edge("chain.js", "CALLS", "a399");
+    assert_ne!(call["status"], "resolved", "{call}");
+    // A short chain still resolves.
+    assert_eq!(edge("chain.js", "REFERENCES", "a0")["status"], "resolved");
+    for (text, rule) in [
+        ("p", "package_entry_tool_dependent"),
+        ("l", "invalid_package_entry"),
+        ("b", "invalid_package_entry"),
+    ] {
+        let import = edge("use.js", "IMPORTS", text);
+        assert_eq!(import["status"], "unsupported", "{import}");
+        assert_eq!(import["evidence"]["rule"], rule, "{import}");
+    }
+    let deep = edge("deep/use.js", "IMPORTS", "d");
+    assert_eq!(
+        deep["evidence"]["rule"], "package_exports_unsupported",
+        "{deep}"
+    );
+    assert_eq!(edge("huge.js", "CALLS", "big.m2999")["status"], "resolved");
+    let bad = edge("huge.js", "CALLS", "bad.run");
+    assert_eq!(bad["evidence"]["rule"], "dynamic_object_members", "{bad}");
+    // Nothing outside the root was read into the graph.
+    assert!(
+        !serde_json::to_string(&edges).unwrap().contains("passwd"),
+        "an outside path leaked into evidence"
     );
 }

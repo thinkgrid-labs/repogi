@@ -720,17 +720,36 @@
    "esm-pkg/user.js",
    "s",
    1
-  ]
- ],
- "unconfirmed": [
+  ],
   [
    "app/main.js",
    3,
    "IMPORTS",
    "b",
-   "unresolved",
-   "commonjs_export_value_not_a_declaration"
+   "lib/named.js",
+   "b",
+   3
   ],
+  [
+   "app/main.js",
+   19,
+   "CALLS",
+   "b",
+   "lib/named.js",
+   "b",
+   3
+  ],
+  [
+   "app/main.js",
+   19,
+   "REFERENCES",
+   "b",
+   "lib/named.js",
+   "b",
+   3
+  ]
+ ],
+ "unconfirmed": [
   [
    "app/main.js",
    9,
@@ -770,22 +789,6 @@
    "session.missing",
    "unresolved",
    "missing_commonjs_export"
-  ],
-  [
-   "app/main.js",
-   19,
-   "CALLS",
-   "b",
-   "unresolved",
-   "commonjs_export_value_not_a_declaration"
-  ],
-  [
-   "app/main.js",
-   19,
-   "REFERENCES",
-   "b",
-   "unresolved",
-   "commonjs_export_value_not_a_declaration"
   ],
   [
    "app/main.js",
@@ -999,6 +1002,7 @@
  "corrections": [
   "2026-11-15: added app/main.js:22 REFERENCES dyn -> const dyn (line 12). The label was omitted; the edge is a plain lexical reference to the const that holds the dynamic require() result. No code change.",
   "2026-11-15: added line 27 (`module.exports = { pkg, esm }`) so a plain use of a require() that is not followed (package, .mjs target) is labeled: it names the local declaration, while the IMPORTS edge stays unsupported.",
-  "2026-11-15: the receiver of a member use of a whole-module require() binding (`session` in `session.validate()`) is a REFERENCES use, as for any variable (v0.1.2 recorded it). The first labels omitted these sites; an extractor bug had stopped recording them. Added the receiver labels for lines 17, 20-22 and esm-pkg/user.js:2, and line 26 (reassigned) as unconfirmed."
+  "2026-11-15: the receiver of a member use of a whole-module require() binding (`session` in `session.validate()`) is a REFERENCES use, as for any variable (v0.1.2 recorded it). The first labels omitted these sites; an extractor bug had stopped recording them. Added the receiver labels for lines 17, 20-22 and esm-pkg/user.js:2, and line 26 (reassigned) as unconfirmed.",
+  "2026-11-16 (v0.1.4, intended semantic change): `exports.b = function () { return 2; }` (lib/named.js:3) is now a callable fact `exports.b`, so the import of `b` (app/main.js:3) and the call and reference on line 19 resolve to it. These three sites moved from unconfirmed (`commonjs_export_value_not_a_declaration`) to resolved. The label states Node.js semantics: the value of `b` is that function expression."
  ]
 }

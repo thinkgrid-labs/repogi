@@ -3,8 +3,9 @@ use code_intel_core::{
     file_id,
     language::Language,
     semantic::{
-        Binding, ClassInfo, CommonJsExport, Evidence, Location, Module, PathMapping, Project,
-        Relationship, Resolution, ResolutionContext, SemanticEdge, Symbol, Usage,
+        Binding, ClassInfo, CommonJsExport, Evidence, ExportsTarget, Location, Module,
+        ObjectProperty, ObjectTable, PackageEntry, PathMapping, Project, Relationship, Resolution,
+        ResolutionContext, SemanticEdge, Symbol, Usage,
     },
 };
 use std::{
@@ -45,7 +46,19 @@ struct Hierarchy {
     /// Member names declared by classes whose superclass is `Unknown`: such a
     /// class may override a method of any class.
     unknown_overrides: HashSet<String>,
+    /// `(module path, property)` written through another module's `require()`
+    /// binding of a `CommonJS` module (`svc.validate = …`); `*` when computed.
+    commonjs_writes: HashSet<(String, String)>,
+    /// `(object owner fact, property)` written outside the object's own table
+    /// statements, through any binding that resolves to it; `*` when computed.
+    object_writes: HashSet<(String, String)>,
+    /// Function declarations whose prototype is changed outside its table
+    /// statements (in another module, or through an alias).
+    prototype_tainted: HashSet<String>,
 }
+
+/// Bound on nested `package.json` `main` redirects followed for one lookup.
+const MAX_PACKAGE_REDIRECTS: usize = 4;
 
 /// Directories the indexer never reads. A mapping into one cannot be checked,
 /// so it is reported as unsupported rather than treated as absent.
@@ -63,6 +76,7 @@ const EXCLUDED_DIRECTORIES: [&str; 8] = [
 pub type Modules = BTreeMap<String, Module>;
 
 #[derive(Default, Clone)]
+#[allow(clippy::struct_excessive_bools)] // Independent outcome flags merged across a lookup.
 struct Targets {
     ids: BTreeSet<String>,
     chain: Vec<String>,
@@ -72,6 +86,9 @@ struct Targets {
     /// Specific rule for a module-resolution outcome, used when the edge ends
     /// with the same status.
     reason: Option<(Resolution, &'static str)>,
+    /// The target is a prototype method selected for a constructed receiver:
+    /// a static declaration, not proof of the runtime callee.
+    dispatch: bool,
 }
 impl Targets {
     fn target(id: String) -> Self {
@@ -96,6 +113,7 @@ impl Targets {
         self.uncertain |= other.uncertain;
         self.unsupported |= other.unsupported;
         self.type_only |= other.type_only;
+        self.dispatch |= other.dispatch;
         if self.reason.is_none() {
             self.reason = other.reason;
         }
@@ -120,6 +138,11 @@ type Located = Result<(String, Vec<String>), Targets>;
 /// What exists for one candidate base path, in TypeScript's lookup order.
 enum Found {
     File(String),
+    /// A file selected through a `package.json` entry field, with the step.
+    Entry(String, String),
+    /// A `package.json` entry Repogi does not choose between tools for, or
+    /// cannot read: the rule and the step.
+    Refused(&'static str, String),
     Missing,
     Conflict(Vec<String>),
     Unindexed(String),
@@ -137,6 +160,10 @@ struct Resolver<'a> {
     /// Top-level export lookups, memoized for one rebind.
     exports: RefCell<HashMap<(String, String), Targets>>,
     classes: HashMap<&'a str, &'a ClassInfo>,
+    /// Object tables by owner fact, with their module path.
+    objects: HashMap<&'a str, (&'a str, &'a ObjectTable)>,
+    /// Prototype tables by function fact, with their module path.
+    prototypes: HashMap<&'a str, (&'a str, &'a ObjectTable)>,
     hierarchy: OnceCell<Hierarchy>,
 }
 impl Resolver<'_> {
@@ -164,7 +191,12 @@ impl Resolver<'_> {
                 Vec::new(),
             ));
         }
-        let relative = name.starts_with("./") || name.starts_with("../");
+        // Node.js also treats bare `.` and `..` as relative (`require("..")`);
+        // TypeScript importers keep the prefix-only rule.
+        let relative = name.starts_with("./")
+            || name.starts_with("../")
+            || (matches!(name, "." | "..")
+                && Language::of(path).is_some_and(Language::is_javascript));
         let (target, steps) = if relative {
             let directory = path.rsplit_once('/').map_or("", |(dir, _)| dir);
             let Some(base) = join(directory, name) else {
@@ -176,6 +208,7 @@ impl Resolver<'_> {
             };
             match self.find(path, &base) {
                 Found::File(target) => (target, Vec::new()),
+                Found::Entry(target, step) => (target, vec![step]),
                 other => return Err(Self::failed(path, name, other, Vec::new(), false)),
             }
         } else {
@@ -195,8 +228,12 @@ impl Resolver<'_> {
         }
         Ok((target, steps))
     }
+    #[allow(clippy::too_many_lines)] // TypeScript's ordered lookup, then self-reference.
     fn mapped(&self, path: &str, name: &str) -> Located {
         let Some(project) = self.project(path) else {
+            if let Some(located) = self.self_reference(path, name) {
+                return located;
+            }
             return Err(Targets::failure(
                 Resolution::Unsupported,
                 "package_or_unmapped_specifier",
@@ -248,6 +285,14 @@ impl Resolver<'_> {
                         ));
                         return Ok((target, steps));
                     }
+                    Found::Entry(target, step) => {
+                        steps.push(format!(
+                            "{}: paths {} -> ./{template} => {target}",
+                            mapping.declared_in, mapping.pattern
+                        ));
+                        steps.push(step);
+                        return Ok((target, steps));
+                    }
                     Found::Missing => steps.push(format!(
                         "{}: paths {} -> ./{template} (no module)",
                         mapping.declared_in, mapping.pattern
@@ -269,6 +314,11 @@ impl Resolver<'_> {
         }
         if let Some(base_url) = &project.base_url
             && let Some(located) = self.via_base_url(project, base_url, path, name, &mut steps)
+        {
+            return located;
+        }
+        if matched.is_none()
+            && let Some(located) = self.self_reference(path, name)
         {
             return located;
         }
@@ -307,6 +357,15 @@ impl Resolver<'_> {
                 ));
                 Some(Ok((target, std::mem::take(steps))))
             }
+            Found::Entry(target, step) => {
+                steps.push(format!(
+                    "{}: baseUrl {} => {target}",
+                    project.config,
+                    if base_url.is_empty() { "." } else { base_url }
+                ));
+                steps.push(step);
+                Some(Ok((target, std::mem::take(steps))))
+            }
             Found::Missing => None,
             other => Some(Err(Self::failed(
                 path,
@@ -325,7 +384,7 @@ impl Resolver<'_> {
         mapped: bool,
     ) -> Targets {
         match found {
-            Found::File(_) => unreachable!("a found file is not a failure"),
+            Found::File(_) | Found::Entry(..) => unreachable!("a found file is not a failure"),
             Found::Missing => Targets::failure(Resolution::Unresolved, "module_not_found", steps),
             Found::Unindexed(file) => {
                 steps.push(format!("{path}: module {name} => {file} (not indexed)"));
@@ -334,6 +393,10 @@ impl Resolver<'_> {
                     "module_resolves_to_unindexed_file",
                     steps,
                 )
+            }
+            Found::Refused(rule, step) => {
+                steps.push(step);
+                Targets::failure(Resolution::Unsupported, rule, steps)
             }
             Found::Excluded => Targets::failure(
                 Resolution::Unsupported,
@@ -374,7 +437,7 @@ impl Resolver<'_> {
     /// The module a specifier's base path names, by the importer's language.
     fn find(&self, importer: &str, base: &str) -> Found {
         if Language::of(importer).is_some_and(Language::is_javascript) {
-            self.find_javascript(base)
+            self.find_javascript(base, 0)
         } else {
             self.find_typescript(base)
         }
@@ -475,9 +538,19 @@ impl Resolver<'_> {
     /// ambiguous instead of one tool's choice. `package.json` (`main`,
     /// `exports`) and unindexed files are unsupported; JSON modules are not
     /// tracked, so they stay unresolved.
-    fn find_javascript(&self, base: &str) -> Found {
+    /// A directory with a `package.json` uses its `main` (Node.js
+    /// `LOAD_AS_DIRECTORY`); one without entry fields falls through to `index`.
+    /// `browser`/`module` fields make the entry tool dependent (unsupported).
+    fn find_javascript(&self, base: &str, depth: usize) -> Found {
         const FILES: [&str; 8] = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
         const INDEXES: [&str; 6] = ["js", "jsx", "mjs", "cjs", "ts", "tsx"];
+        let under = |name: &str| {
+            if base.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{base}/{name}")
+            }
+        };
         let name = base.rsplit('/').next().unwrap_or(base);
         let explicit = name
             .rsplit_once('.')
@@ -498,47 +571,319 @@ impl Resolver<'_> {
                 sources.iter().map(|ext| format!("{stem}.{ext}")).collect(),
             ]
         } else {
-            vec![
-                FILES.iter().map(|ext| format!("{base}.{ext}")).collect(),
-                std::iter::once(format!("{base}/package.json"))
-                    .chain(INDEXES.iter().map(|ext| format!("{base}/index.{ext}")))
+            let package = under("package.json");
+            let mut groups: Vec<Vec<String>> = Vec::new();
+            if !base.is_empty() {
+                groups.push(FILES.iter().map(|ext| format!("{base}.{ext}")).collect());
+            }
+            if self.resolution.other_files.contains(&package)
+                && let Some(entry) = self.resolution.packages.get(base)
+            {
+                // Files win over the directory: check them before the entry.
+                if let Some(files) = groups.first()
+                    && let found @ (Found::File(_)
+                    | Found::Unindexed(_)
+                    | Found::Conflict(_)
+                    | Found::Excluded) = self.first_present(files)
+                {
+                    return found;
+                }
+                return self.package_main(base, &package, entry, depth);
+            }
+            groups.push(
+                INDEXES
+                    .iter()
+                    .map(|ext| under(&format!("index.{ext}")))
                     .collect(),
-            ]
+            );
+            groups
         };
         for group in groups {
-            if group.iter().any(|candidate| {
-                candidate
-                    .rsplit_once('/')
-                    .map_or("", |(dir, _)| dir)
-                    .split('/')
-                    .any(|part| EXCLUDED_DIRECTORIES.contains(&part))
-            }) {
-                return Found::Excluded;
-            }
-            let present: Vec<&String> = group
-                .iter()
-                .filter(|candidate| {
-                    self.modules.contains_key(*candidate)
-                        || self.resolution.other_files.contains(*candidate)
-                })
-                .collect();
-            match present.as_slice() {
-                [] => {}
-                [one] if self.modules.contains_key(*one) => return Found::File((*one).clone()),
-                [one] => return Found::Unindexed((*one).clone()),
-                several => {
-                    // A package.json or an unindexed sibling may redirect or win.
-                    return match several
-                        .iter()
-                        .find(|candidate| !self.modules.contains_key(**candidate))
-                    {
-                        Some(unindexed) => Found::Unindexed((*unindexed).clone()),
-                        None => Found::Conflict(several.iter().map(|c| (*c).clone()).collect()),
-                    };
-                }
+            match self.first_present(&group) {
+                Found::Missing => {}
+                found => return found,
             }
         }
         Found::Missing
+    }
+    /// One candidate group: exactly one existing indexed file, else why not.
+    fn first_present(&self, group: &[String]) -> Found {
+        if group.iter().any(|candidate| {
+            candidate
+                .rsplit_once('/')
+                .map_or("", |(dir, _)| dir)
+                .split('/')
+                .any(|part| EXCLUDED_DIRECTORIES.contains(&part))
+        }) {
+            return Found::Excluded;
+        }
+        let present: Vec<&String> = group
+            .iter()
+            .filter(|candidate| {
+                self.modules.contains_key(*candidate)
+                    || self.resolution.other_files.contains(*candidate)
+            })
+            .collect();
+        match present.as_slice() {
+            [] => Found::Missing,
+            [one] if self.modules.contains_key(*one) => Found::File((*one).clone()),
+            [one] => Found::Unindexed((*one).clone()),
+            several => {
+                // An unindexed sibling may win.
+                match several
+                    .iter()
+                    .find(|candidate| !self.modules.contains_key(**candidate))
+                {
+                    Some(unindexed) => Found::Unindexed((*unindexed).clone()),
+                    None => Found::Conflict(several.iter().map(|c| (*c).clone()).collect()),
+                }
+            }
+        }
+    }
+    /// A directory's `package.json` `main`: the file (or directory) it names,
+    /// as Node.js loads it. Without `main`, the directory's `index` file.
+    fn package_main(&self, base: &str, package: &str, entry: &PackageEntry, depth: usize) -> Found {
+        if let Some(error) = &entry.error {
+            return Found::Refused("invalid_package_entry", format!("{package}: {error}"));
+        }
+        if entry.alternate_entry {
+            return Found::Refused(
+                "package_entry_tool_dependent",
+                format!("{package}: browser/module fields let bundlers choose another entry"),
+            );
+        }
+        if depth >= MAX_PACKAGE_REDIRECTS {
+            return Found::Refused(
+                "package_entry_tool_dependent",
+                format!("{package}: main redirects nest too deeply"),
+            );
+        }
+        let Some(main) = &entry.main else {
+            let indexes: Vec<String> = ["js", "jsx", "mjs", "cjs", "ts", "tsx"]
+                .iter()
+                .map(|ext| {
+                    if base.is_empty() {
+                        format!("index.{ext}")
+                    } else {
+                        format!("{base}/index.{ext}")
+                    }
+                })
+                .collect();
+            return match self.first_present(&indexes) {
+                Found::File(file) => {
+                    Found::Entry(file.clone(), format!("{package}: no main => {file}"))
+                }
+                other => other,
+            };
+        };
+        let Some(target) = join(base, main) else {
+            return Found::Refused(
+                "module_outside_repository",
+                format!("{package}: main {main} leaves the repository root"),
+            );
+        };
+        if target == base {
+            return Found::Refused(
+                "package_entry_tool_dependent",
+                format!("{package}: main {main} names its own directory"),
+            );
+        }
+        match self.find_javascript(&target, depth + 1) {
+            Found::File(file) => {
+                Found::Entry(file.clone(), format!("{package}: main {main} => {file}"))
+            }
+            Found::Entry(file, step) => Found::Entry(
+                file.clone(),
+                format!("{package}: main {main} => {file}; {step}"),
+            ),
+            other => other,
+        }
+    }
+    /// Node.js package self-reference: a bare specifier naming the importing
+    /// file's own package (nearest `package.json` with that `name` and an
+    /// `exports` field). Only exact subpaths and the conditions the importer's
+    /// module kind selects in every tool are followed.
+    #[allow(clippy::too_many_lines)] // Scope, subpath, conditions, target: one rule per step.
+    fn self_reference(&self, importer: &str, name: &str) -> Option<Located> {
+        if !Language::of(importer).is_some_and(Language::is_javascript) {
+            return None;
+        }
+        let mut directory = importer.rsplit_once('/').map_or("", |(dir, _)| dir);
+        let scope = loop {
+            let package = if directory.is_empty() {
+                "package.json".to_owned()
+            } else {
+                format!("{directory}/package.json")
+            };
+            if self.resolution.other_files.contains(&package) {
+                break directory;
+            }
+            if directory.is_empty() {
+                return None;
+            }
+            directory = directory.rsplit_once('/').map_or("", |(dir, _)| dir);
+        };
+        let entry = self.resolution.packages.get(scope)?;
+        let package_name = entry.name.as_deref()?;
+        let exports = entry.exports.as_ref()?;
+        let subpath = if name == package_name {
+            ".".to_owned()
+        } else {
+            let rest = name.strip_prefix(package_name)?.strip_prefix('/')?;
+            format!("./{rest}")
+        };
+        let config = if scope.is_empty() {
+            "package.json".to_owned()
+        } else {
+            format!("{scope}/package.json")
+        };
+        let mut steps = vec![format!("{importer}: {name} is its own package ({config})")];
+        let fail = |status, rule: &'static str, mut steps: Vec<String>, note: String| {
+            steps.push(note);
+            Some(Err(Targets::failure(status, rule, steps)))
+        };
+        let target = match exports {
+            ExportsTarget::Subpaths(entries) => {
+                match entries.iter().find(|(key, _)| *key == subpath) {
+                    Some((_, target)) => target,
+                    None if entries.iter().any(|(key, _)| key.contains('*')) => {
+                        return fail(
+                            Resolution::Unsupported,
+                            "package_exports_pattern",
+                            steps,
+                            format!("{config}: exports {subpath} only matches a pattern"),
+                        );
+                    }
+                    None => {
+                        return fail(
+                            Resolution::Unresolved,
+                            "package_subpath_not_exported",
+                            steps,
+                            format!("{config}: exports has no {subpath}"),
+                        );
+                    }
+                }
+            }
+            other if subpath == "." => other,
+            _ => {
+                return fail(
+                    Resolution::Unresolved,
+                    "package_subpath_not_exported",
+                    steps,
+                    format!("{config}: exports has no {subpath}"),
+                );
+            }
+        };
+        let context = if self.commonjs_capable(importer) {
+            "require"
+        } else {
+            "import"
+        };
+        let mut current = target;
+        let mut chosen = Vec::new();
+        for _ in 0..16 {
+            match current {
+                ExportsTarget::Conditions(entries) => {
+                    let mut next = None;
+                    for (key, value) in entries {
+                        match key.as_str() {
+                            "types" => {}
+                            "require" | "import" if key != context => {}
+                            key if key == context || key == "default" => {
+                                next = Some((key.to_owned(), value));
+                                break;
+                            }
+                            other => {
+                                return fail(
+                                    Resolution::Unsupported,
+                                    "conditional_exports_tool_dependent",
+                                    steps,
+                                    format!(
+                                        "{config}: exports {subpath} condition {other} precedes {context}/default"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    let Some((key, value)) = next else {
+                        return fail(
+                            Resolution::Unresolved,
+                            "package_subpath_not_exported",
+                            steps,
+                            format!(
+                                "{config}: exports {subpath} has no {context}/default condition"
+                            ),
+                        );
+                    };
+                    chosen.push(key);
+                    current = value;
+                }
+                ExportsTarget::Path(path) => {
+                    let valid = path.starts_with("./")
+                        && !path
+                            .split('/')
+                            .any(|part| matches!(part, ".." | "node_modules"));
+                    let Some(file) = valid.then(|| join(scope, path)).flatten() else {
+                        return fail(
+                            Resolution::Unsupported,
+                            "invalid_package_target",
+                            steps,
+                            format!(
+                                "{config}: exports target {path} is not a package-relative path"
+                            ),
+                        );
+                    };
+                    steps.push(format!(
+                        "{config}: exports {subpath}{} -> {path} => {file}",
+                        if chosen.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", chosen.join(", "))
+                        }
+                    ));
+                    return Some(match self.first_present(std::slice::from_ref(&file)) {
+                        Found::File(file) => {
+                            if self.modules[&file].complete {
+                                Ok((file, steps))
+                            } else {
+                                Err(Targets {
+                                    uncertain: true,
+                                    ..Targets::default()
+                                })
+                            }
+                        }
+                        Found::Missing => Err(Targets::failure(
+                            Resolution::Unresolved,
+                            "module_not_found",
+                            steps,
+                        )),
+                        other => Err(Self::failed(importer, name, other, steps, false)),
+                    });
+                }
+                ExportsTarget::Null => {
+                    return fail(
+                        Resolution::Unresolved,
+                        "package_subpath_not_exported",
+                        steps,
+                        format!("{config}: exports {subpath} is null"),
+                    );
+                }
+                ExportsTarget::Subpaths(_) | ExportsTarget::Unsupported(_) => {
+                    return fail(
+                        Resolution::Unsupported,
+                        "package_exports_unsupported",
+                        steps,
+                        format!("{config}: exports {subpath} has an unsupported shape"),
+                    );
+                }
+            }
+        }
+        fail(
+            Resolution::Unsupported,
+            "package_exports_unsupported",
+            steps,
+            format!("{config}: exports nesting too deep"),
+        )
     }
     /// Export lookup. A lookup that starts outside any cycle (empty `seen`)
     /// depends only on the modules, so it is computed once per rebind; lookups
@@ -689,6 +1034,14 @@ impl Resolver<'_> {
         if binding.commonjs {
             return self.require_binding(path, binding, member, seen, true);
         }
+        if let Some(result) = self.alias_origin(path, binding, member, seen) {
+            return result;
+        }
+        if let (Some(constructor), Some(member)) = (&binding.constructed, member)
+            && let Some(result) = self.prototype_member(path, binding, constructor, member, seen)
+        {
+            return result;
+        }
         let mut result = if let Some(from) = binding.module.as_deref() {
             match self.module_path(path, from) {
                 Ok((target, steps))
@@ -765,6 +1118,12 @@ impl Resolver<'_> {
             return result;
         }
         let id = result.ids.first().expect("resolved target");
+        if self.objects.contains_key(id.as_str()) {
+            let owner = id.clone();
+            let mut property = self.object_property(&owner, member, &mut BTreeSet::new());
+            property.chain.extend(result.chain);
+            return property;
+        }
         if self.symbol(id).is_none_or(|symbol| symbol.kind != "class") {
             return Targets {
                 unsupported: true,
@@ -1084,6 +1443,8 @@ impl Resolver<'_> {
                         .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
                     && !Self::bound(module, &usage.name, usage.location.start_byte))
                     || matches!(result.reason, Some((_, "package_or_unmapped_specifier")))
+                    || (usage.member.is_none()
+                        && self.required_package(path, &usage.name, usage.location.start_byte))
                 {
                     // A global (`Error`, `HTMLElement`) or a package import.
                     Super::External
@@ -1111,6 +1472,16 @@ impl Resolver<'_> {
                 );
                 if let Some(id) = self.is_class(&result) {
                     hierarchy.tainted.insert(id);
+                } else if let Some(id) = result
+                    .ids
+                    .first()
+                    .filter(|_| result.status() == Resolution::Resolved)
+                    && let Some((home, table)) = self.prototypes.get(id.as_str())
+                {
+                    // The table's own statements are the prototype, not a change.
+                    if !(*home == path.as_str() && table.statements.contains(&name.offset)) {
+                        hierarchy.prototype_tainted.insert(id.clone());
+                    }
                 } else if !(result.status() == Resolution::Resolved
                     && result
                         .ids
@@ -1141,12 +1512,28 @@ impl Resolver<'_> {
                         );
                         if let Some(id) = self.is_class(&result) {
                             hierarchy.static_writes.insert((id, "*".into()));
+                        } else {
+                            self.object_write(path, write.offset, &result, "*", &mut hierarchy);
                         }
                     }
                     continue;
                 };
                 match write.receiver.as_deref() {
                     Some("module" | "exports") => {}
+                    // `F.prototype.m = …`: a table statement of a function
+                    // declaration's prototype is that prototype, not a write
+                    // on an unknown object. Anything else is an untracked member write.
+                    Some(receiver)
+                        if receiver.ends_with(".prototype")
+                            && self.prototype_statement(path, receiver, write.offset) => {}
+                    // Any other write on a function declaration's prototype
+                    // changes that prototype only.
+                    Some(receiver)
+                        if let Some(function) = receiver.strip_suffix(".prototype")
+                            && let Some(id) = self.function_fact(path, function, write.offset) =>
+                    {
+                        hierarchy.prototype_tainted.insert(id);
+                    }
                     // `this.m = …` inside a class is an own field of that class.
                     Some("this")
                         if module
@@ -1176,9 +1563,28 @@ impl Resolver<'_> {
                                     .static_writes
                                     .insert((id.clone(), property.clone()));
                             }
-                            // Properties of a function object or a module namespace.
+                            // Properties of a function object.
                             (Some(_), Some("function")) => {}
-                            (Some(id), None) if id.starts_with("file:") => {}
+                            // A module object: an ES namespace is read-only; a
+                            // `CommonJS` module's exports object is not.
+                            (Some(id), None) if id.starts_with("file:") => {
+                                self.object_write(
+                                    path,
+                                    write.offset,
+                                    &result,
+                                    property,
+                                    &mut hierarchy,
+                                );
+                            }
+                            (Some(id), _) if self.objects.contains_key(id.as_str()) => {
+                                self.object_write(
+                                    path,
+                                    write.offset,
+                                    &result,
+                                    property,
+                                    &mut hierarchy,
+                                );
+                            }
                             _ => {
                                 hierarchy.assigned.insert(property.clone());
                             }
@@ -1219,6 +1625,38 @@ impl Resolver<'_> {
             children.sort();
         }
         hierarchy
+    }
+    /// Is `name` at `offset` a `require()` binding of a package? Its lexical
+    /// fallback names the local declaration, so the reason is not in the result.
+    fn required_package(&self, path: &str, name: &str, offset: usize) -> bool {
+        let visible: Vec<&Binding> = self.modules[path]
+            .bindings
+            .iter()
+            .filter(|binding| {
+                binding.name == name && binding.scope_start <= offset && offset < binding.scope_end
+            })
+            .collect();
+        let smallest = visible
+            .iter()
+            .map(|binding| binding.scope_end - binding.scope_start)
+            .min();
+        let mut innermost = visible
+            .into_iter()
+            .filter(|binding| Some(binding.scope_end - binding.scope_start) == smallest);
+        let (Some(binding), None) = (innermost.next(), innermost.next()) else {
+            return false;
+        };
+        binding.commonjs
+            && !binding.mutated
+            && binding.imported == "*"
+            && self.commonjs_capable(path)
+            && matches!(
+                self.module_path(path, binding.module.as_deref().unwrap_or_default()),
+                Err(Targets {
+                    reason: Some((_, "package_or_unmapped_specifier")),
+                    ..
+                })
+            )
     }
     /// Does the class fact `id` span byte `offset` in its file?
     fn contains(id: &str, offset: usize) -> bool {
@@ -1505,6 +1943,343 @@ impl Resolver<'_> {
         }
     }
 
+    /// A write of `property` through a binding that resolved to `result`:
+    /// a `CommonJS` module's exports object or an object table. A table's own
+    /// statements in its module are the table, not a later write.
+    fn object_write(
+        &self,
+        path: &str,
+        offset: usize,
+        result: &Targets,
+        property: &str,
+        hierarchy: &mut Hierarchy,
+    ) {
+        if result.status() != Resolution::Resolved {
+            return;
+        }
+        let Some(id) = result.ids.first() else {
+            return;
+        };
+        if let Some(module) = id.strip_prefix("file:") {
+            if self.commonjs_module(module) {
+                hierarchy
+                    .commonjs_writes
+                    .insert((module.to_owned(), property.to_owned()));
+            }
+        } else if let Some((home, table)) = self.objects.get(id.as_str())
+            && !(*home == path && table.statements.contains(&offset))
+        {
+            hierarchy
+                .object_writes
+                .insert((id.clone(), property.to_owned()));
+        }
+    }
+    /// The function declaration fact `name` resolves to at `offset`.
+    fn function_fact(&self, path: &str, name: &str, offset: usize) -> Option<String> {
+        let result = self.local(path, name, None, offset, false, &mut BTreeSet::new());
+        result
+            .ids
+            .first()
+            .filter(|_| result.status() == Resolution::Resolved)
+            .filter(|id| {
+                self.symbol(id)
+                    .is_some_and(|symbol| symbol.kind == "function")
+            })
+            .cloned()
+    }
+    /// Is the write at `offset` (receiver `F.prototype`) one of the statements
+    /// that built `F`'s prototype table in this module?
+    fn prototype_statement(&self, path: &str, receiver: &str, offset: usize) -> bool {
+        let Some(function) = receiver.strip_suffix(".prototype") else {
+            return false;
+        };
+        self.modules[path]
+            .prototypes
+            .iter()
+            .any(|table| table.name == function && table.statements.contains(&offset))
+    }
+    /// The statically known value of one property of an object table.
+    fn object_property(
+        &self,
+        owner: &str,
+        member: &str,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Targets {
+        let Some((path, table)) = self.objects.get(owner) else {
+            return Targets {
+                unsupported: true,
+                ..Targets::default()
+            };
+        };
+        let chain = vec![format!("{path}: object {} property {member}", table.name)];
+        if let Some(reason) = &table.dynamic {
+            return Targets::failure(
+                Resolution::Unresolved,
+                "dynamic_object_members",
+                vec![format!("{path}: object {} is {reason}", table.name)],
+            );
+        }
+        if let Some(hierarchy) = self.hierarchy.get() {
+            if hierarchy
+                .object_writes
+                .contains(&(owner.to_owned(), member.to_owned()))
+                || hierarchy
+                    .object_writes
+                    .contains(&(owner.to_owned(), "*".to_owned()))
+            {
+                return Targets::failure(
+                    Resolution::Unsupported,
+                    "member_reassigned",
+                    vec![format!(
+                        "{path}: {}.{member} is written through another binding",
+                        table.name
+                    )],
+                );
+            }
+            if hierarchy.assigned.contains(member) {
+                return Targets::failure(
+                    Resolution::Unsupported,
+                    "member_assigned_elsewhere",
+                    vec![format!("{member} is assigned on an untracked receiver")],
+                );
+            }
+        }
+        self.table_property(
+            path,
+            table,
+            member,
+            chain,
+            "object_property_static_declaration",
+            seen,
+        )
+    }
+    /// Shared table lookup: the property's single definition, as its fact or
+    /// its value's origin.
+    fn table_property(
+        &self,
+        path: &str,
+        table: &ObjectTable,
+        member: &str,
+        mut chain: Vec<String>,
+        rule: &'static str,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Targets {
+        let Some(property) = table
+            .properties
+            .iter()
+            .find(|property| property.name == member)
+        else {
+            return Targets::failure(Resolution::Unresolved, "missing_object_property", chain);
+        };
+        if property.accessor {
+            return Targets::failure(
+                Resolution::Unsupported,
+                "object_property_is_accessor",
+                chain,
+            );
+        }
+        if property.redefined {
+            chain.push(format!(
+                "{path}: {}.{member} is defined more than once",
+                table.name
+            ));
+            return Targets::failure(Resolution::Unsupported, "object_property_redefined", chain);
+        }
+        let key = (path.to_owned(), format!("table:{}:{member}", table.owner));
+        if seen.contains(&key) || seen.len() >= 64 {
+            return Targets::failure(Resolution::Unsupported, "commonjs_cycle_or_depth", chain);
+        }
+        seen.insert(key.clone());
+        let mut result = self.property_value(path, property, seen);
+        seen.remove(&key);
+        result.chain.extend(chain);
+        if result.status() == Resolution::Resolved && result.reason.is_none() {
+            result.reason = Some((Resolution::Resolved, rule));
+        }
+        result
+    }
+    fn property_value(
+        &self,
+        path: &str,
+        property: &ObjectProperty,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Targets {
+        let export = CommonJsExport {
+            name: property.name.clone(),
+            local: property.local.clone(),
+            module: property.module.clone(),
+            member: property.member.clone(),
+            fact: property.fact.clone(),
+            location: property.location.clone(),
+        };
+        if export.fact.is_none() && export.local.is_none() && export.module.is_none() {
+            return Targets::failure(
+                Resolution::Unresolved,
+                "object_property_value_not_a_declaration",
+                Vec::new(),
+            );
+        }
+        self.commonjs_entry(path, &export, seen)
+    }
+    /// `x.m` where `const x = new F(…)` and `F` is a function declaration with
+    /// a static prototype table. `None` defers to the binding rules (classes,
+    /// functions without a table, unresolved constructors).
+    fn prototype_member(
+        &self,
+        path: &str,
+        binding: &Binding,
+        constructor: &str,
+        member: &str,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Option<Targets> {
+        let resolved = self.local(
+            path,
+            constructor,
+            None,
+            binding.location.start_byte,
+            false,
+            seen,
+        );
+        let id = resolved
+            .ids
+            .first()
+            .filter(|_| resolved.status() == Resolution::Resolved)?;
+        let (home, table) = self.prototypes.get(id.as_str())?;
+        let mut chain = resolved.chain.clone();
+        chain.push(format!(
+            "{path}: {} = new {constructor}(…); {constructor}.prototype.{member}",
+            binding.name
+        ));
+        let fail = |status, rule: &'static str, chain: Vec<String>| {
+            Some(Targets::failure(status, rule, chain))
+        };
+        if let Some(reason) = &table.dynamic {
+            chain.push(format!("{home}: {}.prototype is {reason}", table.name));
+            let rule = if reason == "dynamic_own_members" {
+                "dynamic_own_members"
+            } else {
+                "prototype_may_be_modified"
+            };
+            return fail(Resolution::Unsupported, rule, chain);
+        }
+        if let Some(hierarchy) = self.hierarchy.get() {
+            if hierarchy.prototype_tainted.contains(id) {
+                return fail(Resolution::Unsupported, "prototype_may_be_modified", chain);
+            }
+            if hierarchy.assigned.contains(member) {
+                chain.push(format!("{member} is assigned on an untracked receiver"));
+                return fail(Resolution::Unsupported, "member_assigned_elsewhere", chain);
+            }
+        }
+        if !table
+            .properties
+            .iter()
+            .any(|property| property.name == member)
+        {
+            return fail(
+                Resolution::Unresolved,
+                "member_not_declared_on_prototype",
+                chain,
+            );
+        }
+        let mut result = self.table_property(
+            home,
+            table,
+            member,
+            chain,
+            "prototype_method_static_declaration",
+            seen,
+        );
+        if result.status() == Resolution::Resolved {
+            result.dispatch = true;
+        }
+        Some(result)
+    }
+    /// `const v = w` / `const v = w.p`: when the origin is a source-backed
+    /// implementation (function, method, class), a module or an object table,
+    /// uses of `v` resolve to it and the chain keeps the local declaration.
+    /// `None` keeps the local declaration (unknown or unsupported origin).
+    fn alias_origin(
+        &self,
+        path: &str,
+        binding: &Binding,
+        member: Option<&str>,
+        seen: &mut BTreeSet<(String, String)>,
+    ) -> Option<Targets> {
+        let alias = binding.alias.as_ref()?;
+        if alias.name == binding.name {
+            return None;
+        }
+        let key = (
+            path.to_owned(),
+            format!("alias:{}", binding.location.start_byte),
+        );
+        if seen.contains(&key) || seen.len() >= 64 {
+            return None;
+        }
+        seen.insert(key.clone());
+        let origin = self.local(
+            path,
+            &alias.name,
+            alias.member.as_deref(),
+            binding.location.start_byte,
+            false,
+            seen,
+        );
+        seen.remove(&key);
+        let implementation = origin.status() == Resolution::Resolved
+            && origin.ids.first().is_some_and(|id| {
+                id.starts_with("file:")
+                    || self.objects.contains_key(id.as_str())
+                    || self.symbol(id).is_some_and(|symbol| {
+                        symbol.callable
+                            || matches!(symbol.kind.as_str(), "function" | "method" | "class")
+                    })
+            });
+        let local = binding.target.as_deref().unwrap_or("local");
+        let step = format!(
+            "{path}: {} = {}{} (local declaration {local})",
+            binding.name,
+            alias.name,
+            alias
+                .member
+                .as_deref()
+                .map(|m| format!(".{m}"))
+                .unwrap_or_default()
+        );
+        if !implementation {
+            // A member use through an alias reports why its origin failed.
+            if member.is_some() && origin.status() != Resolution::Resolved {
+                let mut origin = origin;
+                origin.chain.push(step);
+                return Some(origin);
+            }
+            return None;
+        }
+        let mut result = match member {
+            None => origin,
+            Some(member) => {
+                let id = origin.ids.first().cloned().unwrap_or_default();
+                if let Some(module) = id.strip_prefix("file:") {
+                    let mut result = if self.commonjs_module(module) {
+                        self.commonjs_export(module, member, seen)
+                    } else {
+                        self.export(module, member, seen)
+                    };
+                    result.chain.extend(origin.chain);
+                    result
+                } else {
+                    self.member(origin, Some(member))
+                }
+            }
+        };
+        if result.status() == Resolution::Resolved && result.reason.is_none() {
+            result.reason = Some((Resolution::Resolved, "alias_origin"));
+        }
+        result.chain.push(step);
+        Some(result)
+    }
+
     /// The nearest `package.json` `type` at or above `path`'s directory.
     fn package_type(&self, path: &str) -> Option<&str> {
         let mut directory = path.rsplit_once('/').map_or("", |(dir, _)| dir);
@@ -1621,8 +2396,14 @@ impl Resolver<'_> {
     /// value when that is known, else the module's exports object itself.
     fn commonjs_value(&self, path: &str, seen: &mut BTreeSet<(String, String)>) -> Targets {
         let table = self.modules[path].commonjs.as_ref();
+        // Reasons that only affect members leave the value itself known.
+        let value_unknown = table.is_some_and(|table| {
+            table.dynamic.as_deref().is_some_and(|reason| {
+                !code_intel_core::semantic::MEMBER_ONLY_EXPORT_REASONS.contains(&reason)
+            })
+        });
         match table.and_then(|table| table.exports.iter().find(|export| export.name.is_empty())) {
-            Some(_) if table.is_some_and(|table| table.dynamic.is_some()) => Targets::failure(
+            Some(_) if value_unknown => Targets::failure(
                 Resolution::Unresolved,
                 "dynamic_commonjs_exports",
                 Vec::new(),
@@ -1658,6 +2439,22 @@ impl Resolver<'_> {
                 Resolution::Unresolved,
                 "dynamic_commonjs_exports",
                 vec![format!("{path}: exports are {reason}")],
+            );
+        }
+        if let Some(hierarchy) = self.hierarchy.get()
+            && (hierarchy
+                .commonjs_writes
+                .contains(&(path.to_owned(), name.to_owned()))
+                || hierarchy
+                    .commonjs_writes
+                    .contains(&(path.to_owned(), "*".to_owned())))
+        {
+            return Targets::failure(
+                Resolution::Unsupported,
+                "member_reassigned",
+                vec![format!(
+                    "{path}: export {name} is written through another module's require() binding"
+                )],
             );
         }
         if let Some(export) = table.exports.iter().find(|export| export.name == name) {
@@ -1722,8 +2519,12 @@ impl Resolver<'_> {
         } else {
             export.name.as_str()
         };
-        let mut result = if let Some(local) = &export.local {
-            self.local(path, local, None, 0, true, seen)
+        let mut result = if let Some(fact) = &export.fact {
+            let mut result = Targets::target(fact.clone());
+            result.chain.push(format!("{path}: inline value {fact}"));
+            result
+        } else if let Some(local) = &export.local {
+            self.local(path, local, export.member.as_deref(), 0, true, seen)
         } else if let Some(specifier) = &export.module {
             let key = (path.to_owned(), format!("commonjs:{label}"));
             if seen.contains(&key) || seen.len() >= 64 {
@@ -1790,6 +2591,24 @@ impl<'a> Resolver<'a> {
                 .values()
                 .flat_map(|module| &module.classes)
                 .map(|class| (class.id.as_str(), class))
+                .collect(),
+            objects: modules
+                .iter()
+                .flat_map(|(path, module)| {
+                    module
+                        .objects
+                        .iter()
+                        .map(move |table| (table.owner.as_str(), (path.as_str(), table)))
+                })
+                .collect(),
+            prototypes: modules
+                .iter()
+                .flat_map(|(path, module)| {
+                    module
+                        .prototypes
+                        .iter()
+                        .map(move |table| (table.owner.as_str(), (path.as_str(), table)))
+                })
                 .collect(),
             hierarchy: OnceCell::new(),
         }
@@ -1865,6 +2684,7 @@ pub fn resolve(modules: &Modules, resolution: &ResolutionContext) -> Vec<Semanti
             {
                 result.unsupported = true;
             }
+            let dispatch = result.dispatch;
             let expression = usage.syntax.clone();
             let syntax = if usage.jsx {
                 format!("<{expression}> JSX element")
@@ -1882,7 +2702,7 @@ pub fn resolve(modules: &Modules, resolution: &ResolutionContext) -> Vec<Semanti
             if usage.jsx {
                 resolver.jsx_rule(&mut edge);
             }
-            if instance && edge.status == Resolution::Resolved {
+            if (instance || dispatch) && edge.status == Resolution::Resolved {
                 edge.evidence.dispatch = Some("static_declaration".into());
             }
             edges.push(edge);

@@ -1,0 +1,71 @@
+{
+  "schema": "repogi-agent-outcomes-suite/1",
+  "id": "nodekit-v1",
+  "description": "Five development tasks on a small CommonJS package: a package entry point, exports = module.exports, object-literal methods, prototype methods and aliased re-exports. Graders are hidden from the agent and run only after the session ends.",
+  "repository": {
+    "fixture": "fixtures/agent-outcomes/nodekit",
+    "license": "MIT (part of the Repogi source tree)"
+  },
+  "requirements": {
+    "node": ">=20",
+    "git": "any"
+  },
+  "tasks": [
+    {
+      "id": "bugfix-root-path",
+      "category": "bug_fix",
+      "kind": "change",
+      "prompt": "Requests to the root path are broken: after the trailing-slash middleware runs, a request for \"/\" has an empty path. Fix it so \"/\" stays \"/\" while \"/users/\" still becomes \"/users\". Do not change deprecated code. Keep the existing test suite (`npm test`) passing.",
+      "grading": [
+        {"type": "hidden_tests", "path": "hidden/bugfix-root-path"},
+        {"type": "project_tests"},
+        {"type": "changed_within", "allow": ["lib/middleware.js", "tests/**"]},
+        {"type": "unchanged", "paths": ["lib/legacy/middleware.js"]}
+      ]
+    },
+    {
+      "id": "entry-point-investigation",
+      "category": "architecture",
+      "kind": "question",
+      "prompt": "What does `require('nodekit')` return, and which function implements it? Answer in a short paragraph without modifying any files. End your answer with one line of the form `CITATIONS: path:line, path:line, ...` citing where the package entry point is declared, the module that exports the value, and the implementing function.",
+      "grading": [
+        {"type": "no_changes"},
+        {"type": "answer_citations", "prefix": "CITATIONS:", "required_paths": ["package.json", "lib/index.js", "lib/kit.js"]}
+      ]
+    },
+    {
+      "id": "refactor-validator-method",
+      "category": "refactor",
+      "kind": "change",
+      "prompt": "Rename the validator's `check` method to `isNonEmpty` everywhere it is defined and used, including tests. Behavior must not change, and `checkAll` keeps its name.",
+      "grading": [
+        {"type": "hidden_tests", "path": "hidden/refactor-validator-method"},
+        {"type": "project_tests"},
+        {"type": "pattern_absent", "pattern": "\\.check\\b|\\bcheck\\(", "glob": ["lib/**", "tests/**"]},
+        {"type": "changed_within", "allow": ["lib/validator.js", "lib/session.js", "tests/**"]}
+      ]
+    },
+    {
+      "id": "behavior-session-deadline",
+      "category": "feature",
+      "kind": "change",
+      "prompt": "A session must count as expired exactly at its deadline (when the elapsed time equals its time-to-live), not only after it. Change that behavior and keep everything else as it is. Keep `npm test` passing.",
+      "grading": [
+        {"type": "hidden_tests", "path": "hidden/behavior-session-deadline"},
+        {"type": "project_tests"},
+        {"type": "changed_within", "allow": ["lib/session.js", "tests/**"]}
+      ]
+    },
+    {
+      "id": "feature-logger-prefix",
+      "category": "feature",
+      "kind": "change",
+      "prompt": "Give the logger middleware an optional prefix: `logger(lines, prefix)` writes each line as the prefix followed by the existing text, and without a prefix the output is unchanged. Then make the verbose preset log with the prefix \"[kit] \". Keep `npm test` passing.",
+      "grading": [
+        {"type": "hidden_tests", "path": "hidden/feature-logger-prefix"},
+        {"type": "project_tests"},
+        {"type": "changed_within", "allow": ["lib/middleware.js", "lib/presets.js", "tests/**"]}
+      ]
+    }
+  ]
+}

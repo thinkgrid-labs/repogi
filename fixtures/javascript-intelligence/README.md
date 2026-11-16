@@ -1,0 +1,6 @@
+# JavaScript intelligence fixture
+
+Hand-labeled cases for the v0.1.4 JavaScript analysis (`EXPECTED.json`), checked by `crates/cli/tests/static_accuracy.rs`. Labels were written from the source text and Node.js semantics before Repogi indexed this fixture. Nothing here is executed.
+
+Positive: function-valued `exports.name`, `exports = module.exports = fn`, `var x = exports = module.exports = {}` with `x.name = function`, object-literal methods and function-valued properties, `F.prototype.name = …` for `const x = new F()`, class expressions assigned to `module.exports`, alias origins (`const v = obj.m`, `const w = v`), `package.json` `main` and directory `index`, self-reference through exact `exports` subpaths with `require`/`import` conditions.
+Negative: getters, non-function values, missing properties, escaped, spread, deleted, computed and redefined object members, writes through another module's `require()` binding, prototypes that are replaced, escape (`util.inherits`), change conditionally or are redefined, own properties set in a constructor, `browser` fields, conditions before `require`/`import`/`default`, `null` and pattern exports, cyclic re-exports, alias cycles, reassigned functions, shadowed bindings, TypeScript object literals.
