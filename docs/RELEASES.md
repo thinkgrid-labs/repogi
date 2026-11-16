@@ -1,6 +1,6 @@
 # Release assets and verification
 
-This page is the contract between the release workflow, the installers and anyone downloading Repogi by hand. The machine-readable copy is [`scripts/release/contract.py`](../scripts/release/contract.py). The installers implement the same naming independently, and their tests check it.
+This page is the contract between the release workflow, the installers and anyone downloading Repogi by hand. Release notes: [0.1.4 (draft, unpublished)](RELEASE_NOTES_0.1.4.md). The machine-readable copy is [`scripts/release/contract.py`](../scripts/release/contract.py). The installers implement the same naming independently, and their tests check it.
 
 ## Versions and tags
 

@@ -1,0 +1,23 @@
+const a = { run() { return 1; } };
+register(a);
+a.run();
+const b = { run() { return 1; } };
+b[key] = null;
+b.run();
+const c = { run() { return 1; } };
+function patch() { c.run = null; }
+c.run();
+const d = { run() { return 1; } };
+d.run = function () { return 2; };
+d.run();
+let e = { run() { return 1; } };
+e = {};
+e.run();
+const f = { ...a, run() { return 1; } };
+f.run();
+const g = { run() { return 1; } };
+delete g.run;
+g.run();
+const h = { run() { return 1; } };
+h.run();
+module.exports = { patch };

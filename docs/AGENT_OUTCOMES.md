@@ -2,7 +2,7 @@
 
 Does giving a coding agent Repogi improve the outcome of real development tasks, compared with the same agent using only its normal tools? The harness in [`scripts/evaluation/agent_outcomes/`](../scripts/evaluation/agent_outcomes/) measures that with paired, independently graded sessions.
 
-> **Status:** the harness, task suite and graders are implemented and tested offline. **Live outcomes are pending authorization: no live agent results exist yet**, so Repogi makes no claim about task success, tokens, time or cost. A live run needs an agent account and explicit approval of a reviewed, fully pinned plan.
+> **Status:** the harness, two task suites and their graders are implemented and tested offline. **Live outcomes are pending authorization: no live agent results exist yet**, so Repogi makes no claim about task success, tokens, time or cost, for 0.1.4 or any earlier version. A live run needs an agent account and explicit approval of a reviewed, fully pinned plan; an authorization covers only the exact plan digest it names.
 
 ## Design
 
@@ -33,7 +33,17 @@ The bundled suite, `ledgerlite-v1`, uses a small mixed JavaScript/TypeScript rep
 | `architecture-integer-cents` | architecture question with citations | no changes; cited `path:line` must exist and cover the ADR and implementation |
 | `tests-for-apply-tax` | test selection | no changes; listed tests must equal the direct and transitive users |
 
-Prompts never mention graders or hidden material, and the suite validator refuses a task without graders or with graders inside the agent-visible repository.
+`nodekit-v1` (0.1.4) uses a small CommonJS package ([`fixtures/agent-outcomes/nodekit`](../fixtures/agent-outcomes/nodekit)) with a `package.json` `main`, `exports = module.exports = …`, an object-literal validator, a prototype-based `Session` and aliased re-exports: the JavaScript patterns 0.1.4 resolves. It lives in [`suites/nodekit-v1`](../scripts/evaluation/agent_outcomes/suites/nodekit-v1/suite.json); `ledgerlite-v1` is unchanged, so its digests and any plan built on it stay valid.
+
+| Task | Category | Graded by |
+| --- | --- | --- |
+| `bugfix-root-path` | CommonJS middleware bug fix with a same-named deprecated decoy | hidden tests, project tests, allowed files, decoy untouched |
+| `entry-point-investigation` | package entry-point question with citations | no changes; cited `path:line` must exist and cover `package.json`, the entry module and the implementing function |
+| `refactor-validator-method` | object-method rename across modules and tests | hidden tests, project tests, old name absent, allowed files |
+| `behavior-session-deadline` | prototype-method behavior change | hidden tests, project tests, allowed files |
+| `feature-logger-prefix` | change through aliased re-exports (`const makeLogger = middleware.logger`) | hidden tests, project tests, allowed files |
+
+Prompts never mention graders or hidden material, and the suite validator refuses a task without graders or with graders inside the agent-visible repository. Categories reuse the harness's fixed vocabulary (the entry-point question is `architecture`; the behavior change and the alias change are `feature`).
 
 ## Running it
 
@@ -41,6 +51,7 @@ Everything except a live run works offline and costs nothing:
 
 ```sh
 python3 scripts/evaluation/agent_outcomes/run.py validate          # every reference solution passes, every no-op fails
+python3 scripts/evaluation/agent_outcomes/run.py --suite scripts/evaluation/agent_outcomes/suites/nodekit-v1/suite.json validate
 python3 scripts/evaluation/agent_outcomes/tests/test_harness.py    # harness tests (a fake agent executable, no model)
 cargo build --release --locked -p code-intel-cli
 python3 scripts/evaluation/agent_outcomes/run.py plan --adapter mock-reference --output /tmp/plan.json
@@ -71,7 +82,7 @@ Requirements: Python 3.10+, Git, Node.js 20+ (graders), a Repogi build and, for 
 
 ## Sources of bias
 
-- One small repository and six tasks: results describe this suite, not repositories in general.
+- Two small repositories and eleven tasks: results describe these suites, not repositories in general. `nodekit-v1` was written by the Repogi author for patterns 0.1.4 resolves, so it can favor Repogi; report it separately from `ledgerlite-v1`, never pooled.
 - The fixture is part of the Repogi source tree, so a model may have seen similar code; both conditions share that exposure.
 - Repogi's server instructions and tool descriptions add a fixed amount of context (`repogi.mcp_surface.context_chars` in the plan) to every request in the Repogi condition.
 - Retrying infrastructure failures, or excluding them, can bias results if failures cluster in one condition; reports show both counts per condition.

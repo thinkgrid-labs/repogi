@@ -13,7 +13,7 @@ use std::{
 
 use code_intel_core::{
     Diagnostic, MAX_FILE_BYTES,
-    semantic::{PathMapping, Project, ResolutionContext},
+    semantic::{ExportsTarget, PackageEntry, PathMapping, Project, ResolutionContext},
 };
 use serde_json::{Map, Value};
 
@@ -26,6 +26,7 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
     let mut configs: BTreeMap<String, String> = BTreeMap::new();
     let mut module_files = BTreeSet::new();
     let mut package_types = BTreeMap::new();
+    let mut packages = BTreeMap::new();
     for entry in entries {
         if entry.file_type().is_some_and(|kind| kind.is_dir()) {
             continue;
@@ -51,6 +52,9 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
         let extension = Path::new(name).extension().and_then(|value| value.to_str());
         if name == "package.json" {
             package_types.insert(directory.clone(), package_type(root, &relative));
+            if let Some(entry) = package_entry(root, &relative) {
+                packages.insert(directory.clone(), entry);
+            }
         }
         if name == "package.json" || extension.is_some_and(|ext| MODULE_EXTENSIONS.contains(&ext)) {
             module_files.insert(relative);
@@ -78,6 +82,7 @@ pub fn context(root: &Path, entries: &[ignore::DirEntry]) -> (ResolutionContext,
             projects,
             other_files: module_files,
             package_types,
+            packages,
         },
         diagnostics,
     )
@@ -330,6 +335,164 @@ fn package_type(root: &Path, relative: &str) -> String {
         _ => "invalid",
     }
     .into()
+}
+
+/// Bounds on one `exports` value: nesting depth and total entries.
+const MAX_EXPORTS_DEPTH: usize = 8;
+const MAX_EXPORTS_ENTRIES: usize = 1024;
+
+/// The entry-point fields of a `package.json` (`name`, `main`, `exports`, and
+/// whether `browser`/`module` offer bundlers another entry), read as data with
+/// the same file rules as configs. `None` when it declares none of them.
+fn package_entry(root: &Path, relative: &str) -> Option<PackageEntry> {
+    let text = match read(root, relative) {
+        Ok(text) => text,
+        Err(error) => {
+            return Some(PackageEntry {
+                error: Some(error),
+                ..PackageEntry::default()
+            });
+        }
+    };
+    let Ok(Value::Object(object)) =
+        serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text))
+    else {
+        return Some(PackageEntry {
+            error: Some(format!("`{relative}` is not a JSON object")),
+            ..PackageEntry::default()
+        });
+    };
+    let mut entry = PackageEntry {
+        name: object
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        alternate_entry: object.contains_key("browser") || object.contains_key("module"),
+        ..PackageEntry::default()
+    };
+    match object.get("main") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(main)) => entry.main = Some(main.clone()),
+        Some(_) => entry.error = Some("`main` is not a string".into()),
+    }
+    if object.contains_key("exports") {
+        // Condition order matters, and `Value` objects are sorted maps:
+        // re-read the field in source order.
+        let ordered =
+            serde_json::from_str::<ExportsField>(text.strip_prefix('\u{feff}').unwrap_or(&text))
+                .ok()
+                .and_then(|field| field.exports);
+        let mut budget = MAX_EXPORTS_ENTRIES;
+        entry.exports = Some(ordered.map_or_else(
+            || ExportsTarget::Unsupported("exports could not be read in order".into()),
+            |exports| exports_target(&exports, 0, &mut budget),
+        ));
+    }
+    (entry.main.is_some()
+        || entry.exports.is_some()
+        || entry.alternate_entry
+        || entry.error.is_some())
+    .then_some(entry)
+}
+
+/// Only the `exports` field of a `package.json`, with object keys in order.
+#[derive(serde::Deserialize)]
+struct ExportsField {
+    exports: Option<Ordered>,
+}
+
+/// JSON with object entries in source order (duplicate keys kept; the first wins).
+enum Ordered {
+    String(String),
+    Null,
+    Object(Vec<(String, Ordered)>),
+    Array,
+    Other,
+}
+
+impl<'de> serde::Deserialize<'de> for Ordered {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Ordered;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("JSON")
+            }
+            fn visit_str<E>(self, value: &str) -> Result<Ordered, E> {
+                Ok(Ordered::String(value.to_owned()))
+            }
+            fn visit_unit<E>(self) -> Result<Ordered, E> {
+                Ok(Ordered::Null)
+            }
+            fn visit_none<E>(self) -> Result<Ordered, E> {
+                Ok(Ordered::Null)
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_i64<E>(self, _: i64) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_u64<E>(self, _: u64) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_f64<E>(self, _: f64) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Ordered, A::Error> {
+                while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(Ordered::Array)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Ordered, A::Error> {
+                let mut entries: Vec<(String, Ordered)> = Vec::new();
+                while let Some((key, value)) = map.next_entry::<String, Ordered>()? {
+                    if !entries.iter().any(|(existing, _)| *existing == key) {
+                        entries.push((key, value));
+                    }
+                }
+                Ok(Ordered::Object(entries))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+/// An `exports` value: object keys starting with `.` are subpaths, other keys
+/// are conditions; mixing them, arrays and excess size are not followed.
+fn exports_target(value: &Ordered, depth: usize, budget: &mut usize) -> ExportsTarget {
+    if depth > MAX_EXPORTS_DEPTH || *budget == 0 {
+        return ExportsTarget::Unsupported("exports nesting or size limit".into());
+    }
+    *budget -= 1;
+    match value {
+        Ordered::String(path) => ExportsTarget::Path(path.clone()),
+        Ordered::Null => ExportsTarget::Null,
+        Ordered::Object(map) => {
+            let subpaths = map.iter().filter(|(key, _)| key.starts_with('.')).count();
+            if subpaths != 0 && subpaths != map.len() {
+                return ExportsTarget::Unsupported("exports mixes subpaths and conditions".into());
+            }
+            let entries = map
+                .iter()
+                .map(|(key, value)| (key.clone(), exports_target(value, depth + 1, budget)))
+                .collect();
+            if subpaths == 0 {
+                ExportsTarget::Conditions(entries)
+            } else {
+                ExportsTarget::Subpaths(entries)
+            }
+        }
+        Ordered::Array => ExportsTarget::Unsupported("exports fallback arrays".into()),
+        Ordered::Other => {
+            ExportsTarget::Unsupported("exports value is not a path or object".into())
+        }
+    }
 }
 
 /// A regular, non-symlinked config file inside the root, within the size cap.

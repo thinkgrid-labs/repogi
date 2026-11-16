@@ -60,7 +60,10 @@ pub struct SemanticEdge {
 /// object-pattern default values read as expressions instead of bindings.
 /// 3: class member context for `this`/`super`, `CommonJS` `require` bindings and
 /// export tables, member-level (instead of whole-binding) write invalidation.
-pub const SEMANTIC_IR_VERSION: u32 = 3;
+/// 4 (`JavaScript` only): callable facts for function-valued assignments,
+/// object-literal members and class expressions; object and prototype tables;
+/// alias and `new` origins of bindings; chained `exports = module.exports`.
+pub const SEMANTIC_IR_VERSION: u32 = 4;
 
 /// Cached syntax IR, not claims of resolved bindings. Scope ranges are half-open bytes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -90,6 +93,59 @@ pub struct Module {
     /// Static `CommonJS` exports, when the file writes `module.exports`/`exports`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commonjs: Option<CommonJs>,
+    /// Top-level bindings initialized with an object literal (`JavaScript`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<ObjectTable>,
+    /// `F.prototype.m = …` tables of top-level function declarations (`JavaScript`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prototypes: Vec<ObjectTable>,
+}
+
+/// The statically known properties of one object: an object literal held by a
+/// top-level binding, or the prototype of a top-level function declaration.
+/// Only unconditional top-level statements contribute.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ObjectTable {
+    /// The binding (object) or function name (prototype).
+    pub name: String,
+    /// Fact ID of the declaration that owns the table: the variable declarator
+    /// of the object, or the function declaration of the prototype.
+    pub owner: String,
+    pub properties: Vec<ObjectProperty>,
+    /// Byte offsets of the statements' receivers (`X` in `X.m = …`,
+    /// `F` in `F.prototype.m = …`) that built the table: these writes are
+    /// the table itself, not later mutations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statements: Vec<usize>,
+    /// Why the table cannot be trusted (escape, computed or nested writes,
+    /// prototype replacement); then no property resolves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObjectProperty {
+    pub name: String,
+    /// The callable or class fact the value is (inline function, method, class expression).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact: Option<String>,
+    /// A local identifier holding the value (`{ validate }`, `X.m = validate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<String>,
+    /// `local.member` (`X.m = other.n`) or `require("spec").member`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<String>,
+    /// `require("spec")` holding the value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    /// A getter or setter: the property is not a callable value.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub accessor: bool,
+    /// Defined more than once (literal and assignment, or two assignments):
+    /// which value a call sees depends on execution order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub redefined: bool,
+    pub location: Location,
 }
 
 /// A top-level class declaration (by fact ID) and its own property names.
@@ -136,6 +192,15 @@ pub struct MemberContext {
     pub static_context: bool,
 }
 
+/// Dynamic `CommonJS` reasons that leave the `module.exports` value itself
+/// known: only its members are not statically known.
+pub const MEMBER_ONLY_EXPORT_REASONS: [&str; 4] = [
+    "computed_export_key",
+    "spread_or_computed_export",
+    "exports_object_escapes",
+    "nested_or_conditional_export_member_write",
+];
+
 /// Static `CommonJS` exports: only unconditional top-level assignments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommonJs {
@@ -156,8 +221,13 @@ pub struct CommonJsExport {
     /// `require("spec")` (optionally `.member`) holding the value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
+    /// `require("spec").member`, or `local.member` when `local` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member: Option<String>,
+    /// The callable or class fact of an inline value (`exports.f = function () {}`,
+    /// `module.exports = { m() {} }`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact: Option<String>,
     pub location: Location,
 }
 
@@ -182,6 +252,20 @@ pub struct Binding {
     /// `imported` is `*` (the whole `module.exports`) or a property name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub commonjs: bool,
+    /// `const v = w` / `const v = w.p` (`JavaScript`): the value's origin, read
+    /// once at the declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<AliasOf>,
+    /// `const x = new F(…)` (`JavaScript`): the constructor identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constructed: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AliasOf {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +306,11 @@ pub struct Symbol {
     /// runtime target of instance dispatch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signature_only: bool,
+    /// The expression form of a callable or class fact that is not a
+    /// declaration statement: `function_expression`, `arrow_function`,
+    /// `object_method`, `class_expression`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<String>,
 }
 
 /// Project module-resolution settings, read from `tsconfig.json`/`jsconfig.json`
@@ -239,6 +328,39 @@ pub struct ResolutionContext {
     /// (also when the field is absent) or `invalid` (unreadable or not a string).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub package_types: BTreeMap<String, String>,
+    /// Entry-point fields of each `package.json` that declares any, by directory.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub packages: BTreeMap<String, PackageEntry>,
+}
+
+/// The entry-point fields of a local `package.json`, read as data.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackageEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+    /// `browser` or `module` is present: bundlers may pick another entry.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alternate_entry: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exports: Option<ExportsTarget>,
+    /// The file is unreadable or an entry field has an unsupported shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A `package.json` `exports` value: a subpath map, a condition map, a path,
+/// `null`, or a shape Repogi does not follow (arrays).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportsTarget {
+    Path(String),
+    Null,
+    /// Keys in declaration order.
+    Subpaths(Vec<(String, ExportsTarget)>),
+    Conditions(Vec<(String, ExportsTarget)>),
+    Unsupported(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

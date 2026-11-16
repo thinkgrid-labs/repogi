@@ -93,6 +93,9 @@ pub fn extract(path: &str, source: &str, hash: String) -> Result<IndexedFile> {
                 declaration_facts(&mut file, node, source);
             }
         }
+        if language.is_javascript() {
+            value_facts(&mut file, node, source);
+        }
     }
     file.semantic = crate::semantic::extract(root, source, &file);
     Ok(file)
@@ -134,9 +137,15 @@ fn declaration_facts(file: &mut IndexedFile, node: Node<'_>, source: &str) -> Ve
     };
     let name = text(name, source);
     let id = add_fact(file, node, kind, name, source);
-    if matches!(kind, "class" | "interface")
-        && let Some(body) = node.child_by_field_name("body")
-    {
+    if matches!(kind, "class" | "interface") {
+        member_facts(file, node, name, &id, source);
+    }
+    vec![id]
+}
+
+/// Method facts of a class or interface body, named `Owner.method`.
+fn member_facts(file: &mut IndexedFile, node: Node<'_>, name: &str, id: &str, source: &str) {
+    if let Some(body) = node.child_by_field_name("body") {
         let mut cursor = body.walk();
         for method in body.named_children(&mut cursor) {
             if method.has_error()
@@ -155,11 +164,195 @@ fn declaration_facts(file: &mut IndexedFile, node: Node<'_>, source: &str) -> Ve
             }) {
                 let qualified = format!("{name}.{}", text(method_name, source));
                 let method_id = add_fact(file, method, "method", &qualified, source);
-                add_edge(file, method, id.clone(), Some(method_id), None, "contains");
+                add_edge(
+                    file,
+                    method,
+                    id.to_owned(),
+                    Some(method_id),
+                    None,
+                    "contains",
+                );
             }
         }
     }
-    vec![id]
+}
+
+/// `function`, `function*` and arrow expressions.
+fn is_function_value(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "function_expression" | "function" | "arrow_function" | "generator_function"
+    )
+}
+
+/// `a.b.c` built from identifiers and plain property names only.
+fn member_path(node: Node<'_>, source: &str) -> Option<String> {
+    match node.kind() {
+        "identifier" => Some(text(node, source).to_owned()),
+        "member_expression" => {
+            let object = member_path(node.child_by_field_name("object")?, source)?;
+            let property = node
+                .child_by_field_name("property")
+                .filter(|property| property.kind() == "property_identifier")?;
+            Some(format!("{object}.{}", text(property, source)))
+        }
+        _ => None,
+    }
+}
+
+/// `JavaScript` values that are declarations without a declaration statement,
+/// in top-level slots only: `a.b = function () {}` / `= () => {}` / `= class {}`
+/// (the last assignment of a chain), members of `module.exports = { … }` and
+/// of `const x = { … }`, and `const x = class {}`. Nested or conditional code
+/// is not scanned: its values have no stable declaration identity here.
+fn value_facts(file: &mut IndexedFile, node: Node<'_>, source: &str) {
+    if node.has_error() {
+        return;
+    }
+    match node.kind() {
+        "expression_statement" => {
+            let Some(mut assignment) = node
+                .named_child(0)
+                .filter(|child| child.kind() == "assignment_expression")
+            else {
+                return;
+            };
+            while let Some(right) = assignment
+                .child_by_field_name("right")
+                .filter(|right| right.kind() == "assignment_expression")
+            {
+                assignment = right;
+            }
+            let (Some(left), Some(value)) = (
+                assignment.child_by_field_name("left"),
+                assignment.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+            let Some(path) = member_path(left, source).filter(|path| path.contains('.')) else {
+                return;
+            };
+            if is_function_value(value) {
+                callable_fact(file, assignment, value, &path, source);
+            } else if value.kind() == "class" {
+                class_expression_fact(file, value, &path, source);
+            } else if value.kind() == "object" && path == "module.exports" {
+                object_facts(file, value, &path, source);
+            }
+        }
+        "export_statement" => {
+            if let Some(declaration) = node.child_by_field_name("declaration") {
+                value_facts(file, declaration, source);
+            }
+        }
+        "lexical_declaration" | "variable_declaration" => {
+            let mut cursor = node.walk();
+            for declarator in node.named_children(&mut cursor) {
+                let (Some(name), Some(mut value)) = (
+                    declarator
+                        .child_by_field_name("name")
+                        .filter(|name| name.kind() == "identifier"),
+                    declarator.child_by_field_name("value"),
+                ) else {
+                    continue;
+                };
+                // `const p = module.exports = { … }`: the object is `p`.
+                while value.kind() == "assignment_expression" {
+                    let Some(right) = value.child_by_field_name("right") else {
+                        break;
+                    };
+                    value = right;
+                }
+                let name = text(name, source).to_owned();
+                match value.kind() {
+                    "object" => object_facts(file, value, &name, source),
+                    "class" => class_expression_fact(file, value, &name, source),
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A function-valued slot (`site` holds the name and the value). The signature
+/// is the header before the function body.
+fn callable_fact(
+    file: &mut IndexedFile,
+    site: Node<'_>,
+    value: Node<'_>,
+    name: &str,
+    source: &str,
+) {
+    add_fact(file, site, "function", name, source);
+    if let (Some(fact), Some(body)) = (file.facts.last_mut(), value.child_by_field_name("body")) {
+        let header = source[site.start_byte()..body.start_byte()].trim_end();
+        fact.signature = (!header.is_empty()).then(|| Signature {
+            snippet: header.into(),
+            end_line: site.start_position().row + header.lines().count(),
+        });
+    }
+}
+
+/// A class expression in a supported slot: its own name, else the slot's.
+fn class_expression_fact(file: &mut IndexedFile, class: Node<'_>, slot: &str, source: &str) {
+    let name = class
+        .child_by_field_name("name")
+        .map_or(slot, |name| text(name, source))
+        .to_owned();
+    let id = add_fact(file, class, "class", &name, source);
+    member_facts(file, class, &name, &id, source);
+}
+
+/// Methods and function-valued properties of an object literal, named `owner.key`.
+/// Getters and setters are accessors, not callable values, and get no fact.
+fn object_facts(file: &mut IndexedFile, object: Node<'_>, owner: &str, source: &str) {
+    let mut cursor = object.walk();
+    for property in object.named_children(&mut cursor) {
+        if property.has_error() {
+            continue;
+        }
+        let key = |key: Option<Node<'_>>| {
+            key.and_then(|key| match key.kind() {
+                "property_identifier" => Some(text(key, source).to_owned()),
+                "string" => {
+                    let literal = text(key, source);
+                    literal
+                        .get(1..literal.len().saturating_sub(1))
+                        .filter(|inner| !inner.contains('\\'))
+                        .map(str::to_owned)
+                }
+                _ => None,
+            })
+        };
+        match property.kind() {
+            "method_definition" if !token(property, "get") && !token(property, "set") => {
+                if let Some(name) = key(property.child_by_field_name("name")) {
+                    add_fact(file, property, "method", &format!("{owner}.{name}"), source);
+                }
+            }
+            "pair" => {
+                let (Some(name), Some(value)) = (
+                    key(property.child_by_field_name("key")),
+                    property.child_by_field_name("value"),
+                ) else {
+                    continue;
+                };
+                let qualified = format!("{owner}.{name}");
+                if is_function_value(value) {
+                    callable_fact(file, property, value, &qualified, source);
+                } else if value.kind() == "class" {
+                    class_expression_fact(file, value, &qualified, source);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn token(node: Node<'_>, kind: &str) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor).any(|child| child.kind() == kind)
 }
 
 fn text<'a>(node: Node<'_>, source: &'a str) -> &'a str {

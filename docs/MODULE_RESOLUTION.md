@@ -29,7 +29,7 @@ The rules come from the TypeScript handbook:
 | Directories Repogi never reads | Visible to TypeScript. | A mapping into `node_modules`, `dist`, `build`, `coverage`, `.next`, `generated`, `.git` or `.code-intel` is unsupported. |
 
 **Not supported, so reported explicitly rather than guessed:**
-- package resolution and package.json `exports`/`imports`/`typesVersions`;
+- package resolution (`node_modules`), and for TypeScript importers package.json `main`/`exports`/`imports`/`typesVersions` (JavaScript importers: [package entry points](#package-entry-points));
 - `moduleSuffixes`, `moduleResolution: classic`, `rootDirs`, `customConditions`;
 - project references, and `include`/`exclude` membership;
 - files hidden by `.gitignore`. These are treated as absent, so a mapping that depends on ignored generated files can fall through to a later substitution.
@@ -41,13 +41,38 @@ TypeScript's candidate order is one tool's choice. For a file in `.js`, `.jsx`, 
 | Specifier | Repogi |
 |---|---|
 | With an extension (`./a.js`, `./b.mjs`, `./c.jsx`, `./d.ts`) | Exactly that file. If it does not exist, the TypeScript source compiled to that name: `a.js` → `a.ts`/`a.tsx`, `b.mjs` → `b.mts`, `c.cjs` → `c.cts` (several candidates: **ambiguous**). An existing `a.js` always wins over `a.ts`. |
-| Without an extension (`./a`) | Files first: `a.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`. Exactly one must exist; two or more (for example `a.js` beside `a.ts` or `a.mjs`) are **ambiguous**. Only when no file exists, the directory: `a/package.json` is **unsupported** (its `main`/`exports` are not modeled), otherwise exactly one `a/index.*`. |
+| Without an extension (`./a`, and `.`/`..`) | Files first: `a.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`. Exactly one must exist; two or more (for example `a.js` beside `a.ts` or `a.mjs`) are **ambiguous**. Only when no file exists, the directory: its `package.json` `main` when it has one ([package entry points](#package-entry-points)), otherwise exactly one `a/index.*`. Bare `.` and `..` are relative, as in Node.js (0.1.4; `require("..")` previously fell through to package lookup). |
 | JSON (`./data.json`, or `./data` with only `data.json`) | Not tracked; **unresolved**. |
-| Bare (`react`, `@scope/pkg`) | `jsconfig`/`tsconfig` `paths` and `baseUrl` as above, then **unsupported** (`package_or_unmapped_specifier`). |
+| Bare (`react`, `@scope/pkg`) | `jsconfig`/`tsconfig` `paths` and `baseUrl` as above, then the importing file's own package through `exports` ([self-reference](#package-entry-points)), then **unsupported** (`package_or_unmapped_specifier`). |
 | `require('./a')` | In a CommonJS file (`.cjs`, or `.js`/`.jsx` without ES module syntax and not under `"type": "module"`), a literal specifier binds like an import, with the same lookup ([CommonJS](STATIC_ANALYSIS_ACCURACY.md#commonjs)). The `require(...)` call itself stays **unresolved**. |
 | `import('./a')` | Not an import binding. The call stays **unresolved** (no binding named `import`). |
 
 These are static claims about which file a specifier names. They say nothing about whether the module loads at runtime under a particular tool.
+
+## Package entry points
+
+0.1.4, JavaScript importers only. `package.json` files inside the repository are read as data, with the same rules as configs: regular files only (never through symlinks), inside the root, size-capped; nothing is installed, downloaded or executed. Their entry fields are part of the resolution fingerprint, so editing them rebinds without reparsing.
+
+**Directory imports** (`require("./pkg")`, `require("..")`) follow Node.js `LOAD_AS_DIRECTORY`:
+
+| `package.json` | Result |
+| --- | --- |
+| No `main`, `exports`, `browser` or `module` field | The directory's `index` file, as if there were no `package.json` (previously **unsupported**). |
+| `main` | The file `main` names, or that path as a directory (its own `package.json`, then `index`). Evidence: `pkg/package.json: main ./lib/x.js => pkg/lib/x.js`. A target that does not exist is **unresolved**; one outside the root is **unsupported** (`module_outside_repository`). |
+| `browser` or `module` present | **Unsupported** (`package_entry_tool_dependent`): bundlers may pick another entry than Node.js. |
+| Unreadable, malformed, a symlink, or a non-string `main` | **Unsupported** (`invalid_package_entry`). |
+| `main` redirects nested more than 4 deep (including cycles) | **Unsupported** (`package_entry_tool_dependent`). |
+
+`exports` does not apply to relative directory imports (Node.js uses it only for package names), so it is not consulted there.
+
+**Self-reference.** A bare specifier that names the importing file's own package (the nearest `package.json` above it has that `name` and an `exports` field) resolves through `exports`, as Node.js does:
+
+- Only exact subpaths: `"."` (or a top-level string or condition object) for `name`, `"./utils"` for `name/utils`. A subpath matched only by a `*` pattern is **unsupported** (`package_exports_pattern`); one that is absent or `null` is **unresolved** (`package_subpath_not_exported`).
+- Conditions are walked in declaration order with the conditions every tool agrees on for the importer: `require` in a CommonJS file, `import` otherwise, and `default`. `types` is skipped; the other of `require`/`import` is skipped. Any other condition before the match (`node`, `browser`, `module`, `development`, custom names) is **unsupported** (`conditional_exports_tool_dependent`).
+- The target must be `./`-relative without `..` or `node_modules` (`invalid_package_target`) and names exactly that file: no extension or `index` search. A target in `dist/`, `build/` and other directories Repogi never reads is unsupported like any other excluded path.
+- Fallback arrays, objects mixing subpaths and conditions, and nesting beyond 8 levels or 1,024 entries are **unsupported** (`package_exports_unsupported`).
+
+Packages in `node_modules`, workspace packages imported by name from another package, and `imports` (`#internal`) are not followed.
 
 ## Statuses and rules
 
@@ -59,7 +84,11 @@ Non-resolved module outcomes carry a specific `evidence.rule`. Edges that bind t
 | `ambiguous_module_candidates` | ambiguous | Several indexed `x.ts`/`x.tsx`/`x/index.*` forms; the candidates are listed in evidence. |
 | `package_or_unmapped_specifier` | unsupported | A bare specifier that no pattern matched and `baseUrl` did not find: usually a package. |
 | `module_resolves_to_unindexed_file` | unsupported | TypeScript would pick a non-indexed file (JS, `.mts`, `package.json` redirect) first. |
-| `module_outside_repository` | unsupported | A relative or `baseUrl` path leaves the root. |
+| `module_outside_repository` | unsupported | A relative or `baseUrl` path, or a `package.json` `main`, leaves the root. |
+| `package_entry_tool_dependent` | unsupported | A directory's `package.json` has `browser`/`module`, or `main` redirects too deep. |
+| `invalid_package_entry` | unsupported | A directory's `package.json` cannot be read as data. |
+| `package_exports_pattern`, `conditional_exports_tool_dependent`, `invalid_package_target`, `package_exports_unsupported` | unsupported | A self-reference through `exports` that Repogi does not choose for the tools. |
+| `package_subpath_not_exported` | unresolved | The package's `exports` has no such subpath (or it is `null`). |
 | `path_mapping_outside_repository` | unsupported | A substitution (or `*` capture such as `@/../x`) leaves the root. |
 | `path_mapping_into_excluded_directory`, `module_in_excluded_directory` | unsupported | The candidate lies in a directory the indexer never reads. |
 | `base_url_outside_repository` | unsupported | `baseUrl` is outside the root. |

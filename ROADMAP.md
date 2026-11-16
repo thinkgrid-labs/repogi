@@ -7,8 +7,8 @@ No dates. Order within each table is the intended order of work. Status: **In pr
 | Item | Status | Done when |
 | --- | --- | --- |
 | Install and onboarding | Planned | Scripted README quick start passes on every published target |
-| 0.1.3 release | In progress | Static analysis accuracy (instance members, CommonJS, narrower invalidation) passes release checks; publishing requires approval |
-| Agent-task evaluation | In progress | Harness, tasks, graders and a draft plan are in source; live paired runs need an authorized plan with the model and agent pinned. Done when live results are published and third parties can reproduce them |
+| 0.1.4 release | In progress | Implemented in source: instance members, CommonJS and narrower invalidation (developed as the unpublished 0.1.3 milestone), callable values, object and prototype tables, alias origins, local package entry points. Done when it passes release checks and the owner approves publishing; 0.1.2 remains the latest release until then |
+| Agent-task evaluation | In progress | Harness, two task suites (`ledgerlite-v1`, `nodekit-v1` for CommonJS) and graders are in source; no live run has been authorized, so there are no live results and no claimed improvement. Done when live results are published and third parties can reproduce them |
 | Windows | Exploring | Full test suite passes natively on Windows |
 
 ## P1 — Developer experience
@@ -28,7 +28,7 @@ Each language needs syntax extraction, module resolution, reference semantics an
 | Item | Status | Done when |
 | --- | --- | --- |
 | Shared analyzer architecture | In progress | New languages added without changing TypeScript results (JavaScript changed only coverage wording; Python next) |
-| JavaScript, JSX, MJS, CJS, MTS, CTS | In progress | In source: resolved references and impact; static CommonJS bindings and `this`/`super` instance members (0.1.3); zero wrong confirmed edges on three labeled fixtures; four real repositories evaluated. Next: package entry points, prototype-object methods |
+| JavaScript, JSX, MJS, CJS, MTS, CTS | In progress | Released in 0.1.2: resolved references and impact. In source for 0.1.4: CommonJS, `this`/`super`, callable values, object and prototype methods, alias origins, local `package.json` entry points; zero wrong confirmed edges on three labeled fixtures; four real repositories evaluated three ways. Next: constructor-typed receivers, helper-based mixins |
 | Python | Exploring | Imports, then resolved direct calls; dynamic code stays unconfirmed |
 | Rust | Exploring | Cargo workspaces, then resolved references for macro-free code |
 | Go | Exploring | Packages, modules and resolved references |
@@ -41,8 +41,8 @@ Each language needs syntax extraction, module resolution, reference semantics an
 | Compact JSON and progressive retrieval | Exploring | More evidence per byte; `investigate` gains `context`-style detail levels |
 | Bounded multi-hop knowledge traversal | Exploring | Depth limits, cycle handling and lineage; gain shown on labeled tasks |
 | More precise test-impact candidates | Exploring | Higher precision and recall on labeled change sets |
-| Monorepo workspaces and package `exports` | Exploring | Cross-package imports (including `require("../..")` into a package root) resolve with provenance |
-| Advanced instance receivers | Exploring | Typed receivers (`this.chart.update()`, constructor-typed locals) resolve without trading precision |
+| Monorepo workspaces and package `exports` | Exploring | Cross-package imports by name resolve with provenance (local `main`, `require("../..")` and self-reference `exports` are in source for 0.1.4) |
+| Advanced instance receivers | Exploring | Typed receivers (`this.chart.update()`, `new C()` locals for classes) resolve without trading precision (`new F()` with prototype tables is in source for 0.1.4) |
 | Mixed-language graph | Exploring | Each result names its package, language and resolution status |
 
 ## P2 — Knowledge and memory

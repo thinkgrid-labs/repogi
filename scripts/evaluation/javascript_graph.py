@@ -18,6 +18,17 @@ is asked for the definition at:
     implementation other than the claimed declaration (no override a runtime
     dispatch could select).
 
+Alias-origin edges (`const v = obj.m; v()` resolved to the origin) are also
+checked at each alias initializer named in their evidence chain, because the
+definition TypeScript reports at a use is the local alias itself.
+
+Recall is reported twice. `recall_calls` counts a miss only when TypeScript
+names a declaration the evaluated binary indexes (the original method; its
+denominator grows when a binary indexes more declarations).
+`recall_calls_fixed_model` counts a miss whenever TypeScript names any
+in-corpus definition that is not an import alias or a parameter, so its
+denominator does not depend on the binary.
+
 TypeScript is an oracle, not ground truth: disagreements are listed for review.
 """
 import argparse
@@ -156,7 +167,8 @@ def main():
         for e in js_edges:
             key = f"{e['kind']}:{e['status']}"
             counts[key] = counts.get(key, 0) + 1
-        precision_sites, recall_sites = [], []
+        precision_sites, recall_sites, alias_sites = [], [], []
+        local_alias = re.compile(r'\(local declaration (variable:[^)]+)\)$')
         for i, e in enumerate(js_edges):
             if e['kind'] in ('EXPORTS',):
                 continue
@@ -165,6 +177,14 @@ def main():
                 if e['evidence'].get('dispatch'):
                     site['implementations'] = True
                 precision_sites.append(site)
+                # Each alias hop: ask for the definition at the initializer's
+                # last character (`m` in `const v = obj.m`).
+                for step in e['evidence']['binding_chain']:
+                    found = local_alias.search(step)
+                    if found:
+                        path, _, end = parse_id(found.group(1))
+                        alias_sites.append({'key': f'alias:{i}:{len(alias_sites)}', 'edge': i,
+                                            'path': path, 'byte': end - 1})
             elif e['status'] != 'resolved' and e['kind'] == 'CALLS' and NAME_CHAIN.fullmatch(e['evidence']['syntax']):
                 # Only static names (`f`, `a.b`, `this.m`); a callee that is
                 # itself a call or index expression has no declaration to find.
@@ -172,7 +192,7 @@ def main():
         sites_file = Path(tmp) / 'sites.json'
         oracle_file = Path(tmp) / 'oracle.mjs'
         oracle_file.write_text(ORACLE)
-        sites_file.write_text(json.dumps(precision_sites + recall_sites))
+        sites_file.write_text(json.dumps(precision_sites + recall_sites + alias_sites))
         started = time.monotonic()
         subprocess.run(['node', str(oracle_file), str(root), str(sites_file), str(args.typescript.resolve())],
                        check=True, timeout=3600, cwd=tmp)
@@ -192,19 +212,33 @@ def main():
                 dispatch_conflicts.append((e, others))
             else:
                 dispatch_single += 1
+        alias_answers = {}
+        for site in alias_sites:
+            alias_answers.setdefault(site['edge'], []).extend(answers.get(site['key'], []))
         agreed, disagree, no_answer, external = set(), [], 0, 0
+        alias_confirmed, alias_unconfirmed = 0, []
         for site in precision_sites:
             e = js_edges[site['key']]
             path, start, end = parse_id(e['target_id'])
             defs = answers[site['key']]
             inside = [d for d in defs if not d.get('external')]
-            if not defs:
+            hit = lambda found: any(not d.get('external') and d['path'] == path and start <= d['byte'] < end
+                                    for d in found)
+            if inside and hit(inside):
+                agreed.add(site['key'])
+            elif site['key'] in alias_answers and hit(alias_answers[site['key']]):
+                # TypeScript names the local alias at the use and the claimed
+                # target at the alias initializer.
+                agreed.add(site['key'])
+                alias_confirmed += 1
+            elif site['key'] in alias_answers:
+                alias_unconfirmed.append((e, defs + alias_answers[site['key']]))
+                disagree.append((e, defs))
+            elif not defs:
                 no_answer += 1
             elif not inside:
                 external += 1
                 disagree.append((e, defs))
-            elif any(d['path'] == path and start <= d['byte'] < end for d in inside):
-                agreed.add(site['key'])
             else:
                 disagree.append((e, defs))
         # Recall counts only sites where TypeScript names a declaration Repogi
@@ -212,8 +246,14 @@ def main():
         # alias of a package that is not in the corpus, object-literal members,
         # parameters and locals) and are reported separately.
         missed, out_of_model, oracle_unresolved = [], {}, 0
+        fixed_missed, fixed_by_kind = [], {}
         for site in recall_sites:
             inside = [d for d in answers[site['key']] if not d.get('external')]
+            implementation = [d for d in inside if d['kind'] not in ('alias', 'parameter')]
+            if implementation:
+                fixed_missed.append(js_edges[site['key']])
+                kind = implementation[0]['kind']
+                fixed_by_kind[kind] = fixed_by_kind.get(kind, 0) + 1
             if not inside:
                 oracle_unresolved += 1
             elif any(indexed_declaration(d) for d in inside):
@@ -246,6 +286,25 @@ def main():
                              'missed_by_rule': reasons,
                              'estimated_recall': round(resolved_calls_agree / (resolved_calls_agree + len(missed)), 4)
                              if resolved_calls_agree + len(missed) else None},
+            'recall_calls_fixed_model': {
+                'resolved_calls_confirmed_by_oracle': resolved_calls_agree,
+                'missed_in_corpus_definitions': len(fixed_missed),
+                'missed_by_typescript_kind': dict(sorted(fixed_by_kind.items(), key=lambda kv: -kv[1])),
+                'estimated_recall': round(resolved_calls_agree / (resolved_calls_agree + len(fixed_missed)), 4)
+                if resolved_calls_agree + len(fixed_missed) else None},
+            'resolved_by_rule': dict(sorted(
+                ((rule, sum(1 for e in js_edges if e['status'] == 'resolved' and e['evidence']['rule'] == rule))
+                 for rule in {e['evidence']['rule'] for e in js_edges if e['status'] == 'resolved'}),
+                key=lambda kv: -kv[1])),
+            'alias_origins': {'edges': len({site['edge'] for site in alias_sites}),
+                              'agree_at_use': len({site['edge'] for site in alias_sites} & agreed) - alias_confirmed,
+                              'checked_at_initializer': alias_confirmed + len(alias_unconfirmed),
+                              'confirmed_at_initializer': alias_confirmed,
+                              'unconfirmed': len(alias_unconfirmed),
+                              'unconfirmed_for_review': [
+                                  {'site': f"{e['location']['path']}:{e['location']['start_line']}",
+                                   'syntax': e['evidence']['syntax'][:80], 'repogi': e['target_id'], 'typescript': d[:4]}
+                                  for e, d in alias_unconfirmed[:args.max_review]]},
             'instance_dispatch': {'checked': len(implementations), 'no_other_implementation': dispatch_single,
                                   'other_implementations': len(dispatch_conflicts),
                                   'conflicts_for_review': [
@@ -263,7 +322,8 @@ def main():
     text = json.dumps(result, indent=2, ensure_ascii=False)
     if args.output:
         args.output.write_text(text + '\n')
-    print(json.dumps({k: result[k] for k in ('files', 'timing_s', 'index_bytes', 'precision', 'recall_calls', 'instance_dispatch')}, indent=1))
+    print(json.dumps({k: result[k] for k in ('files', 'timing_s', 'index_bytes', 'precision', 'recall_calls',
+                                             'recall_calls_fixed_model', 'alias_origins', 'instance_dispatch')}, indent=1))
 
 
 if __name__ == '__main__':
