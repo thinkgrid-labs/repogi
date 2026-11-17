@@ -15,9 +15,9 @@ No dates. Order within each table is the intended order of work. Status: **In pr
 
 | Item | Status | Done when |
 | --- | --- | --- |
-| `repogi doctor` | In progress | Read-only check of index, memory, freshness and agent setup, with fixes (in source; ships in 0.1.2) |
-| `repogi init` | In progress | First index and Git ignore rules, never overwrites files (in source; ships in 0.1.2) |
-| Agent setup | In progress | Project-scoped MCP config for Claude Code and Codex in source (`repogi agent add`); other clients later |
+| `repogi doctor` | In progress | Read-only check of index, memory, freshness and agent setup, with fixes (released in 0.1.2) |
+| `repogi init` | In progress | First index and Git ignore rules, never overwrites files (released in 0.1.2) |
+| Agent setup | In progress | Project-scoped MCP config for Claude Code and Codex (`repogi agent add`, released in 0.1.2); other clients later |
 | Optional `repogi.yaml` | Exploring | Include/exclude and defaults; cannot widen access beyond the repo |
 | Opt-in `repogi watch` | Exploring | Foreground incremental re-indexing; explicit indexing stays default |
 

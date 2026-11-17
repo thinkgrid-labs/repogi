@@ -44,7 +44,7 @@ Everything here is static: no indexed code runs, and a confirmed edge names a de
 
 ## Measured
 
-Against TypeScript 6.0.3 on four pinned repositories (estimates for these repositories, not guarantees), compared with 0.1.2: no resolved edge of 0.1.2 was lost; call recall, measured independently of which declarations a version indexes, rose from 0.24 to 0.88 on Express, 0.02 to 0.90 on Koa, 0.09 to 0.37 on RealWorld and 0.41 to 0.64 on Chart.js; oracle disagreements fell from 1,000 to 240 on Express and from 497 to 2 on Koa, all classified as naming a real declaration one hop from TypeScript's answer. Five hand-labeled fixtures (491 resolved labels, 170 unconfirmed sites) have no wrong confirmed edge. Cold indexing uses 11–35% more CPU than 0.1.2 on these repositories (median of 5 interleaved runs; the Chart.js figure is within its run-to-run spread), with 3–14% more peak memory and an index 2–10% larger; query latency is unchanged: [performance](STATIC_ANALYSIS_ACCURACY.md#performance).
+Against TypeScript 6.0.3 on four pinned repositories (estimates for these repositories, not guarantees), compared with 0.1.2: no resolved edge of 0.1.2 was lost; call recall, measured independently of which declarations a version indexes, rose from 0.24 to 0.88 on Express, 0.02 to 0.90 on Koa, 0.09 to 0.37 on RealWorld and 0.41 to 0.64 on Chart.js; oracle disagreements fell from 1,000 to 240 on Express and from 497 to 2 on Koa, all classified as naming a real declaration one hop from TypeScript's answer. Five hand-labeled fixtures (491 resolved labels, 170 unconfirmed sites) have no wrong confirmed edge. Cold indexing uses 11–35% more CPU than 0.1.2 on these repositories (median of 5 interleaved runs; the Chart.js figure is within its run-to-run spread), with 3–14% more peak memory and an index 2–10% larger; query latency is unchanged: [performance](STATIC_ANALYSIS_ACCURACY.md#performance). Code dense in CommonJS exports can cost more: a synthetic 200-package monorepo in which every file has 20 `exports.f = function` assignments took 116% more cold-index CPU (0.219 s → 0.473 s), from the new callable-value facts and export tables; workspace discovery added about 4% of that. No-op re-indexing is within 10% of 0.1.2.
 
 ## Evaluation
 
@@ -55,6 +55,19 @@ Against TypeScript 6.0.3 on four pinned repositories (estimates for these reposi
 ## Agent outcomes
 
 No live agent runs have been authorized, so these notes make no claim about task success, tokens, time or cost. The harness ships with two offline-validated task suites (`ledgerlite-v1`, and `nodekit-v1` for CommonJS code): [agent outcomes](AGENT_OUTCOMES.md).
+
+## Security and repository isolation
+
+Unchanged from 0.1.2. Indexing reads files inside the repository root only and never runs indexed code. The only process it starts is `git`, with hooks and fsmonitor disabled. There are no network calls, and Repogi has no HTTP or TLS dependencies. The MCP server's tools are read-only. The new manifest handling follows the same rules: `package.json` and `pnpm-workspace.yaml` are read as size-capped regular files, never through symlinks or outside the root. Workspace patterns and member counts are bounded, and evidence never names a path outside the repository.
+
+## Platforms
+
+Prebuilt binaries, as for 0.1.2:
+
+- Linux x86_64 and ARM64 with glibc 2.34 or newer.
+- macOS 11 or newer on Intel and Apple silicon.
+
+Windows is not supported yet. Asset names and verification: [release assets](RELEASES.md).
 
 ## Known limits
 
