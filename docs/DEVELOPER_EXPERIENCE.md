@@ -40,7 +40,7 @@ next:
 ```text
 $ repogi doctor
 repogi doctor: /home/me/ledgerlite
-  [ok  ] binary        repogi 0.1.2 on linux-x86_64
+  [ok  ] binary        repogi 0.1.3 on linux-x86_64
   [ok  ] repository    /home/me/ledgerlite (nearest index)
   [ok  ] index         schema 5, revision 1
   [ok  ] coverage      indexed javascript 15, jsx 1, tsx 1, typescript 1
