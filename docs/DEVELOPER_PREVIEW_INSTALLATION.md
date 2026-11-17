@@ -3,7 +3,9 @@
 Repogi is a developer preview. Source repository: https://github.com/thinkgrid-labs/repogi.
 License: [MIT](../LICENSE). See [third-party notices](../THIRD_PARTY_NOTICES.md) for dependency licenses.
 
-> **Release status:** the latest release is **0.1.1**. Its prebuilt binaries cover TypeScript/TSX code intelligence, project knowledge, `knowledge trace`, `investigate` and project memory. JavaScript/JSX indexing and the `init`, `doctor` and `agent add` commands are part of the next release, 0.1.2. Until it is published, [build from source](#build-from-source) to use them.
+> **Release status:** the latest published release is **0.1.2**. Its prebuilt binaries, which the installer below fetches, cover TypeScript, TSX, JavaScript and JSX code intelligence (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`), project knowledge, `knowledge trace`, `investigate`, project memory and the `init`, `doctor` and `agent add` commands.
+>
+> The next release, **0.1.3**, is a release candidate in source and **not yet published**. It adds `this`/`super` methods, static CommonJS, callable values, object and prototype methods, `new C()` receivers, alias origins, computed symbol keys, local `package.json` entry points and workspace packages ([draft release notes](RELEASE_NOTES_0.1.3.md)). The installer cannot install it until it is published; until then, [build from source](#build-from-source) to use these features.
 
 Repogi is one self-contained executable, `repogi`. Running it needs no Rust, Cargo, Node.js or Python.
 
@@ -39,17 +41,17 @@ Options (also available as environment variables):
 
 | Option | Variable | Meaning |
 | --- | --- | --- |
-| `--version 0.1.0` | `REPOGI_VERSION` | Install that release, e.g. `0.1.1-preview.1`. |
+| `--version 0.1.2` | `REPOGI_VERSION` | Install that published release, e.g. `0.1.2` or a pinned pre-release such as `0.1.1-preview.1`. |
 | `--install-dir DIR` | `REPOGI_INSTALL_DIR` | Install into `DIR` (created if missing; paths with spaces work). |
 | `--verify-attestation` | | Also run `gh attestation verify` on the archive. |
 | | `REPOGI_RELEASES_URL` | Mirror or test server replacing `https://github.com/thinkgrid-labs/repogi/releases`. HTTPS only; plain HTTP is accepted only for `127.0.0.1`/`localhost`. |
 
-Pass options through the pipe with `sh -s --`, for example `... | sh -s -- --version 0.1.0`. To read the script before running it:
+Pass options through the pipe with `sh -s --`, for example `... | sh -s -- --version 0.1.2`. To read the script before running it:
 
 ```sh
 curl -fsSLO https://github.com/thinkgrid-labs/repogi/releases/latest/download/install.sh
 less install.sh
-sh install.sh --version 0.1.0
+sh install.sh --version 0.1.2
 ```
 
 Rerunning the installer is safe. It replaces the executable with the requested version, which also covers upgrades and downgrades. To uninstall, delete `~/.local/bin/repogi`. Indexes stay inside each project's `.code-intel/` directory.
@@ -65,7 +67,7 @@ Download an archive and `SHA256SUMS` from the [Releases page](https://github.com
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS           # Linux
 shasum -a 256 --check --ignore-missing SHA256SUMS       # macOS
-gh attestation verify repogi-0.1.0-aarch64-apple-darwin.tar.gz --repo thinkgrid-labs/repogi   # optional provenance
+gh attestation verify repogi-0.1.2-aarch64-apple-darwin.tar.gz --repo thinkgrid-labs/repogi   # optional provenance
 ```
 
 Unpack the archive and put `repogi` on your `PATH`. The archive also holds `LICENSE`, `THIRD_PARTY_NOTICES.md`, `licenses/` and a `BUILD-INFO.json` that records the version, target, source commit, Rust compiler and the executable's SHA-256. The macOS binaries are not notarized. A browser download may be quarantined; `xattr -d com.apple.quarantine repogi` clears that. The installer downloads with `curl`, so its copy is not quarantined.
@@ -86,11 +88,13 @@ For development, use `cargo build --workspace --locked` and `cargo test --worksp
 ## First project
 
 ```sh
-repogi index /absolute/path/to/project
 cd /absolute/path/to/project
+repogi init        # find the root, count sources, make Git ignore the index
+repogi index .
+repogi doctor      # read-only health check with suggested fixes
 repogi context "authentication flow" --format text
 ```
 
-Indexing explicitly creates `.code-intel/index.db` inside that project. Rerun indexing after source changes. Navigation supports TypeScript `.ts` and TSX `.tsx`; use native search for other languages. Git is needed for impact commands. The indexer never executes the indexed project's scripts.
+Indexing explicitly creates `.code-intel/index.db` inside that project. Reviewed project memory lives separately in `.repogi/memory.db`, which indexing never rewrites ([memory storage](MEMORY_STORAGE.md)). Rerun indexing after source changes. Navigation supports TypeScript and JavaScript (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`; see [supported languages](SUPPORTED_LANGUAGES.md)); use native search for other languages. Git is needed for impact commands. The indexer never executes the indexed project's scripts.
 
 Each repository has its own index. Indexing `~/projects/frontend` and `~/projects/backend` creates two independent `.code-intel/` directories, and nothing is shared between them. Start one MCP server per project with `--root` (see [MCP](MCP.md)). Configure a local client using the [client examples](../examples/agents/), replacing the executable placeholder with the output of `command -v repogi`. Check [navigation limits](REFERENCE_NAVIGATION_LIMITS.md) before treating a response as complete.

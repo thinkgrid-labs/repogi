@@ -28,7 +28,7 @@ Repogi helps most on questions with many static consumers or several dependency 
 
 ### Install a prebuilt binary
 
-Release **0.1.1** provides prebuilt binaries for Linux (x86_64, ARM64; glibc 2.34+) and macOS 11+ (Intel, Apple silicon). The installer verifies the download's SHA-256 checksum and installs into `~/.local/bin` without `sudo`:
+Release **0.1.2** provides prebuilt binaries for Linux (x86_64, ARM64; glibc 2.34+) and macOS 11+ (Intel, Apple silicon). The installer verifies the download's SHA-256 checksum and installs into `~/.local/bin` without `sudo`:
 
 ```sh
 curl -fsSL https://github.com/thinkgrid-labs/repogi/releases/latest/download/install.sh | sh
@@ -80,10 +80,10 @@ Indexing is explicit and incremental. Rerun `repogi index .` after edits; unchan
 | What did we already decide, and is it still supported? | `repogi memory search "session storage"` | `atlas_memory` (opt-in, read-only) | 0.1.1 |
 | Is my setup healthy, and how do I connect an agent? | `repogi init`, `repogi doctor`, `repogi agent add claude` | — | 0.1.2 |
 | The same questions for JavaScript and JSX code | all of the above | all of the above | 0.1.2 |
-| Which implementation does a CommonJS, object, prototype or `new C()` call reach? | `repogi graph`, `repogi context` | `atlas_references`, `atlas_dependencies` | source |
-| What does an import of a local workspace package (`@acme/session`) reach? | `repogi graph`, `repogi impact` | `atlas_references`, `atlas_impact` | source |
+| Which implementation does a CommonJS, object, prototype or `new C()` call reach? | `repogi graph`, `repogi context` | `atlas_references`, `atlas_dependencies` | 0.1.3 (unreleased) |
+| What does an import of a local workspace package (`@acme/session`) reach? | `repogi graph`, `repogi impact` | `atlas_references`, `atlas_impact` | 0.1.3 (unreleased) |
 
-*Release* is the first release that includes the capability; *source* means build from source until the next release.
+*Release* is the first release that includes the capability. *0.1.3 (unreleased)* means the capability is in source: build from source until 0.1.3 is published. The installer's latest release (0.1.2) does not include it.
 
 ### Navigate code
 

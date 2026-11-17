@@ -2,10 +2,10 @@
 
 | Language | Extensions | Grammar | Since |
 | --- | --- | --- | --- |
-| TypeScript | `.ts` (including `.d.ts`), `.mts`, `.cts` | Tree-sitter TypeScript 0.23.2 | `.ts` 0.1.0; `.mts`/`.cts` source builds (0.1.2) |
+| TypeScript | `.ts` (including `.d.ts`), `.mts`, `.cts` | Tree-sitter TypeScript 0.23.2 | `.ts` 0.1.0; `.mts`/`.cts` 0.1.2 |
 | TSX | `.tsx` | Tree-sitter TSX 0.23.2 | 0.1.0 |
-| JavaScript | `.js`, `.mjs`, `.cjs` (JSX syntax accepted) | Tree-sitter JavaScript 0.23.1 | source builds (0.1.2) |
-| JSX | `.jsx` | Tree-sitter JavaScript 0.23.1 | source builds (0.1.2) |
+| JavaScript | `.js`, `.mjs`, `.cjs` (JSX syntax accepted) | Tree-sitter JavaScript 0.23.1 | 0.1.2 |
+| JSX | `.jsx` | Tree-sitter JavaScript 0.23.1 | 0.1.2 |
 
 Extensions match exactly and case-sensitively (`a.JS` is not indexed). Markdown (`.md` and `.markdown`, case-insensitive) is indexed separately as project knowledge: it supplies document intent and source locations, never resolved code relationships. See [Knowledge](KNOWLEDGE.md).
 
