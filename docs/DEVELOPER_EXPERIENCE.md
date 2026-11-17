@@ -1,6 +1,6 @@
 # Set up a repository
 
-Three commands take a repository from nothing to a connected agent. They are part of the next release, 0.1.2; build from source to use them until it is published. None of them uses the network, runs project code or package scripts, or changes memories.
+Three commands take a repository from nothing to a connected agent. They are available since release 0.1.2. None of them uses the network, runs project code or package scripts, or changes memories.
 
 ```sh
 cd /path/to/project
@@ -88,7 +88,7 @@ repogi agent add codex  --root /abs/path/to/project [--write]  # .codex/config.t
 
 ## Installing without Rust
 
-Prebuilt Linux and macOS binaries need no Rust, Cargo, Node.js or Python; see [installation](DEVELOPER_PREVIEW_INSTALLATION.md). Until 0.1.2 is published, `init`, `doctor` and `agent add` require a source build.
+Prebuilt Linux and macOS binaries need no Rust, Cargo, Node.js or Python; see [installation](DEVELOPER_PREVIEW_INSTALLATION.md). `init`, `doctor` and `agent add` are included in the 0.1.2 binaries.
 
 ## Configuration file
 

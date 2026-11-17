@@ -926,7 +926,8 @@ fn constructed_receivers_at_scale_stay_bounded() {
             edge["kind"] == "CALLS"
                 && edge["target_text"]
                     .as_str()
-                    .is_some_and(|text| text.ends_with(".m"))
+                    .and_then(|text| text.rsplit_once('.'))
+                    .is_some_and(|(_, member)| member == "m")
         })
         .collect();
     assert!(!calls.is_empty());

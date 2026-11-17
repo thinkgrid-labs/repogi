@@ -4,7 +4,9 @@
 
 ## Upgrading from 0.1.2
 
-- Install 0.1.3 and run `repogi index` once. Every source file is reparsed (syntax IR 2 → 5); no SQLite schema migration is needed, and the result equals a fresh index.
+- Install 0.1.3 directly over 0.1.2 (`curl -fsSL https://github.com/thinkgrid-labs/repogi/releases/latest/download/install.sh | sh -s -- --version 0.1.3`, or rerun the installer once 0.1.3 is the latest release), then run `repogi index` once in each project.
+- Versions: the syntax IR moves from 2 to 5. The index database schema (5), the durable memory schema (1), the memory export format (1), the document IR (2) and the relationship IR (1) are unchanged. These numbers are independent of the release number.
+- Re-indexing reparses every source file (syntax IR 2 → 5); no SQLite schema migration is needed, and the result equals a fresh index.
 - Until you re-index, read-only commands (`status`, `graph`, `context`, `investigate`, `doctor`, MCP tools, `memory list/show/verify`) work on the old index and never migrate it. `repogi doctor` reports `index was built by an older extractor`.
 - `.repogi/memory.db` is not touched. Approved memories stay byte-identical and keep verifying against the re-indexed graph.
 - Downgrading works the same way in reverse: an older binary reparses once.
@@ -43,6 +45,12 @@ Everything here is static: no indexed code runs, and a confirmed edge names a de
 ## Measured
 
 Against TypeScript 6.0.3 on four pinned repositories (estimates for these repositories, not guarantees), compared with 0.1.2: no resolved edge of 0.1.2 was lost; call recall, measured independently of which declarations a version indexes, rose from 0.24 to 0.88 on Express, 0.02 to 0.90 on Koa, 0.09 to 0.37 on RealWorld and 0.41 to 0.64 on Chart.js; oracle disagreements fell from 1,000 to 240 on Express and from 497 to 2 on Koa, all classified as naming a real declaration one hop from TypeScript's answer. Five hand-labeled fixtures (491 resolved labels, 170 unconfirmed sites) have no wrong confirmed edge. Cold indexing uses 11–35% more CPU than 0.1.2 on these repositories (median of 5 interleaved runs; the Chart.js figure is within its run-to-run spread), with 3–14% more peak memory and an index 2–10% larger; query latency is unchanged: [performance](STATIC_ANALYSIS_ACCURACY.md#performance).
+
+## Evaluation
+
+- Labeled correctness fixtures: `instance-dispatch`, `commonjs`, `javascript-intelligence`, `receiver-intelligence` and `workspace-packages`, with labels written from source text before indexing and every later correction recorded. `crates/cli/tests/static_accuracy.rs` fails on any wrong confirmed edge.
+- `scripts/evaluation/javascript_graph.py` compares resolved edges with TypeScript's language service, and reports call recall on a fixed denominator that does not depend on which declarations a version indexes, so versions can be compared fairly.
+- Agent outcome harness: suite `nodekit-v1` for CommonJS code, alongside `ledgerlite-v1`.
 
 ## Agent outcomes
 

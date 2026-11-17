@@ -51,7 +51,7 @@ These are static claims about which file a specifier names. They say nothing abo
 
 ## Package entry points
 
-Internal 0.1.4 (released in 0.1.3), JavaScript importers only. `package.json` files inside the repository are read as data, with the same rules as configs: regular files only (never through symlinks), inside the root, size-capped; nothing is installed, downloaded or executed. Their entry fields are part of the resolution fingerprint, so editing them rebinds without reparsing.
+Part of 0.1.3 (developed as internal milestone 0.1.4; unreleased until 0.1.3 is published), JavaScript importers only. `package.json` files inside the repository are read as data, with the same rules as configs: regular files only (never through symlinks), inside the root, size-capped; nothing is installed, downloaded or executed. Their entry fields are part of the resolution fingerprint, so editing them rebinds without reparsing.
 
 **Directory imports** (`require("./pkg")`, `require("..")`) follow Node.js `LOAD_AS_DIRECTORY`:
 
